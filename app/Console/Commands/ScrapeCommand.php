@@ -19,8 +19,8 @@ class ScrapeCommand extends Command
     protected $signature = 'scraper:run 
                             {platform? : Platform to scrape (amazon, flipkart, vijaysales, reliancedigital, croma, all)}
                             {--force : Force scraping even if recently scraped}
-                            {--limit=50 : Limit number of products per platform}
-                            {--timeout=7200 : Maximum execution time in seconds}';
+                            {--limit=70 : Limit number of products per platform}
+                            {--timeout=14400 : Maximum execution time in seconds}';
 
     /**
      * The console command description.

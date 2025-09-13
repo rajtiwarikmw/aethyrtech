@@ -27,14 +27,14 @@ abstract class BaseScraper
     ];
 
     protected float $startTime;
-    protected int $maxExecutionTime = 3600; // 1 hour default limit
+    protected int $maxExecutionTime = 14400; // 1 hour default limit
     protected ?\App\Services\ProxyRotator $proxyRotator = null;
 
     public function __construct(string $platform)
     {
         $this->platform = $platform;
         $this->startTime = microtime(true);
-        $this->maxExecutionTime = config('scraper.schedule.max_execution_time', 3600); // Use config value
+        $this->maxExecutionTime = config('scraper.schedule.max_execution_time', 14400); // Use config value
 
         // Set PHP execution time limit
         set_time_limit($this->maxExecutionTime + 300); // Add 5 minutes buffer
@@ -383,7 +383,7 @@ abstract class BaseScraper
         }
 
         // Stop if too many errors
-        if ($this->stats['errors_count'] > 10) {
+        if ($this->stats['errors_count'] > 1000) {
             Log::warning("Too many errors, stopping pagination");
             return false;
         }

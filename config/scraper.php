@@ -27,13 +27,14 @@ return [
             'base_url' => 'https://www.amazon.in',
             'category_urls' => [
                 'https://www.amazon.in/s?k=printers&rh=n%3A1375443031&ref=nb_sb_noss',
+                //'https://www.amazon.in/s?k=Cartridge&rh=n%3A14784020031&ref=nb_sb_noss'
             ]
         ],
         'flipkart' => [
             'name' => 'Flipkart',
             'base_url' => 'https://www.flipkart.com',
             'category_urls' => [
-                'https://www.flipkart.com/computers/laptops/pr?sid=6bo%2Cb5g',
+                'https://www.flipkart.com/computers/computer-peripherals/printers-inks/printers/pr?sid=6bo%2Fffn%2Ft64',
             ]
         ],
         'vijaysales' => [
@@ -68,7 +69,7 @@ return [
     'schedule' => [
         'enabled' => env('SCRAPER_SCHEDULE_ENABLED', true),
         'interval_hours' => env('SCRAPER_INTERVAL_HOURS', 48), // 2 days
-        'max_execution_time' => env('SCRAPER_MAX_EXECUTION_TIME', 3600), // 1 hour (reduced from 2 hours)
+        'max_execution_time' => env('SCRAPER_MAX_EXECUTION_TIME', 14400), // 4 hour
     ],
 
     /*
@@ -85,7 +86,7 @@ return [
         'max_model_length' => 200,
         'price_range' => [
             'min' => 100,  // Minimum product price in INR
-            'max' => 600000  // Maximum product price in INR
+            'max' => 1600000  // Maximum product price in INR
         ]
     ],
 
@@ -97,7 +98,7 @@ return [
 
     'images' => [
         'download_enabled' => env('SCRAPER_DOWNLOAD_IMAGES', false),
-        'max_images_per_product' => 5,
+        'max_images_per_product' => 15,
         'allowed_extensions' => ['jpg', 'jpeg', 'png', 'webp'],
         'max_file_size' => 5 * 1024 * 1024, // 5MB
         'storage_path' => 'images/products'

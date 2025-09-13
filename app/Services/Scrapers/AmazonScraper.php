@@ -17,7 +17,7 @@ class AmazonScraper extends BaseScraper
             'max_pages' => 150, // Increased from 100 to handle more pages
             'page_param' => 'page',
             'has_next_selector' => '.a-pagination .a-last:not(.a-disabled)',
-            'max_consecutive_errors' => 5, // Allow more errors before stopping
+            'max_consecutive_errors' => 100, // Allow more errors before stopping
             'delay_between_pages' => [3, 7], // Longer delays to avoid rate limiting
             'retry_failed_pages' => true,
             'max_retries_per_page' => 3
@@ -39,7 +39,8 @@ class AmazonScraper extends BaseScraper
         try {
             // Amazon product links patterns
             $selectors = [
-                'div[data-cy="title-recipe"] > a'
+                'div[data-cy="title-recipe"] > a',
+                'a.a-link-normal.s-no-outline',
             ];
 
             foreach ($selectors as $selector) {
