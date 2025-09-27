@@ -30,6 +30,7 @@ class DataSanitizer
         $sanitized['product_url'] = self::sanitizeUrl($data['product_url'] ?? null);
         $sanitized['category'] = self::sanitizeString($data['category'] ?? null);
         $sanitized['currency_code'] = self::sanitizeString($data['currency_code'] ?? null);
+        $sanitized['seller_name'] = self::sanitizeText($data['seller_name'] ?? null);
 
         // Numeric fields
         $sanitized['price'] = self::sanitizePrice($data['price'] ?? null);

@@ -9,6 +9,8 @@ use App\Services\Scrapers\FlipkartScraper;
 use App\Services\Scrapers\VijaySalesScraper;
 use App\Services\Scrapers\RelianceDigitalScraper;
 use App\Services\Scrapers\CromaScraper;
+use App\Services\Scrapers\BlinkitScraper;
+use App\Services\Scrapers\BigBasketScraper;
 
 class ScraperServiceProvider extends ServiceProvider
 {
@@ -41,6 +43,14 @@ class ScraperServiceProvider extends ServiceProvider
 
         $this->app->bind('scraper.croma', function ($app) {
             return new CromaScraper();
+        });
+
+        $this->app->bind('scraper.blinkit', function ($app) {
+            return new BlinkitScraper();
+        });
+
+        $this->app->bind('scraper.bigbasket', function ($app) {
+            return new BigBasketScraper();
         });
     }
 
@@ -116,6 +126,8 @@ class ScraperServiceProvider extends ServiceProvider
             'scraper.vijaysales',
             'scraper.reliancedigital',
             'scraper.croma',
+            'scraper.blinkit',
+            'scraper.bigbasket',
         ];
     }
 }

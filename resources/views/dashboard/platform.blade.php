@@ -464,16 +464,16 @@
     const changesChart = new Chart(changesCtx, {
         type: 'line',
         data: {
-            labels: @json($chartData['dailyChanges'] - > pluck('date') - > toArray()),
+            labels: @json($chartData['dailyChanges']-> pluck('date')-> toArray()),
             datasets: [{
                 label: 'Products Added',
-                data: @json($chartData['dailyChanges'] - > pluck('added') - > toArray()),
+                data: @json($chartData['dailyChanges']-> pluck('added')-> toArray()),
                 borderColor: chartColors.success,
                 backgroundColor: chartColors.success + '20',
                 tension: 0.4
             }, {
                 label: 'Products Updated',
-                data: @json($chartData['dailyChanges'] - > pluck('updated') - > toArray()),
+                data: @json($chartData['dailyChanges']-> pluck('updated')-> toArray()),
                 borderColor: chartColors.info,
                 backgroundColor: chartColors.info + '20',
                 tension: 0.4
@@ -495,9 +495,9 @@
     const brandChart = new Chart(brandCtx, {
         type: 'doughnut',
         data: {
-            labels: @json($chartData['brandDistribution'] - > pluck('brand') - > toArray()),
+            labels: @json($chartData['brandDistribution']-> pluck('brand')-> toArray()),
             datasets: [{
-                data: @json($chartData['brandDistribution'] - > pluck('count') - > toArray()),
+                data: @json($chartData['brandDistribution']-> pluck('count')-> toArray()),
                 backgroundColor: [
                     chartColors.primary,
                     chartColors.success,

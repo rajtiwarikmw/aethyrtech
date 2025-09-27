@@ -25,6 +25,7 @@ class Product extends Model
         'review_count',
         'brand',
         'model_name',
+        'highlights',
         'color',
         'image_urls',
         'video_urls',

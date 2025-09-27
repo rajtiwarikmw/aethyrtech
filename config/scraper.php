@@ -26,8 +26,8 @@ return [
             'name' => 'Amazon India',
             'base_url' => 'https://www.amazon.in',
             'category_urls' => [
-                'https://www.amazon.in/s?k=printers&rh=n%3A1375443031&ref=nb_sb_noss',
-                //'https://www.amazon.in/s?k=Cartridge&rh=n%3A14784020031&ref=nb_sb_noss'
+                //'https://www.amazon.in/s?k=printers&rh=n%3A1375443031&ref=nb_sb_noss',
+                'https://www.amazon.in/s?k=Cartridge&rh=n%3A14784020031&ref=nb_sb_noss'
             ]
         ],
         'flipkart' => [
@@ -57,18 +57,32 @@ return [
             'category_urls' => [
                 'https://www.croma.com/computers-tablets/laptops/c/20',
             ]
+        ],
+        'blinkit' => [
+            'name' => 'Blinkit',
+            'base_url' => 'https://blinkit.com',
+            'category_urls' => [
+                'https://blinkit.com/s/?q=printer',
+            ]
+        ],
+        'bigbasket' => [
+            'name' => 'Bigbasket',
+            'base_url' => 'https://www.bigbasket.com',
+            'category_urls' => [
+                'https://www.bigbasket.com/pc/electronics/phone-laptop-accessory/printers-ink/?nc=nb',
+            ]
         ]
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Scraping Schedule
+    | Scraping Schedule  
     |--------------------------------------------------------------------------
     */
 
     'schedule' => [
         'enabled' => env('SCRAPER_SCHEDULE_ENABLED', true),
-        'interval_hours' => env('SCRAPER_INTERVAL_HOURS', 48), // 2 days
+        'interval_hours' => env('SCRAPER_INTERVAL_HOURS', 168), // 7 days
         'max_execution_time' => env('SCRAPER_MAX_EXECUTION_TIME', 14400), // 4 hour
     ],
 
@@ -85,7 +99,7 @@ return [
         'max_brand_length' => 100,
         'max_model_length' => 200,
         'price_range' => [
-            'min' => 100,  // Minimum product price in INR
+            'min' => 10,  // Minimum product price in INR
             'max' => 1600000  // Maximum product price in INR
         ]
     ],

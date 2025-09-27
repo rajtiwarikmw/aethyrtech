@@ -109,7 +109,7 @@ abstract class BaseScraper
                 }
             }
 
-            $this->deactivateOldProducts();
+            //$this->deactivateOldProducts();
             $this->scrapingLog->complete($this->stats);
 
             Log::info("Completed scraping for platform: {$this->platform}", $this->stats);
@@ -136,7 +136,7 @@ abstract class BaseScraper
     protected function scrapeCategoryWithPagination(string $categoryUrl): void
     {
         $currentPage = 1;
-        $maxPages = $this->paginationConfig['max_pages'] ?? 50;
+        $maxPages = $this->paginationConfig['max_pages'] ?? 150;
         $noProductsCount = 0;
         $maxNoProductsPages = 3;
         $consecutiveErrors = 0;

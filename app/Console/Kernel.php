@@ -15,7 +15,7 @@ class Kernel extends ConsoleKernel
         // Main scraping schedule - every 2 days (48 hours)
         $schedule->command('scraper:run all')
                  ->twiceDaily(2, 14) // Run at 2 AM and 2 PM
-                 ->withoutOverlapping(7200) // Prevent overlap, max 2 hours
+                 ->withoutOverlapping(14400) // Prevent overlap, max 2 hours
                  ->runInBackground()
                  ->emailOutputOnFailure(config('mail.admin_email'))
                  ->appendOutputTo(storage_path('logs/scraper-schedule.log'));
@@ -51,7 +51,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('scraper:run amazon')
                  ->daily()
                  ->at('01:00')
-                 ->withoutOverlapping(3600)
+                 ->withoutOverlapping(14400)
                  ->when(function () {
                      return config('scraper.platforms.amazon.enabled', true);
                  });
@@ -60,7 +60,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('scraper:run flipkart')
                  ->daily()
                  ->at('03:00')
-                 ->withoutOverlapping(3600)
+                 ->withoutOverlapping(14400)
                  ->when(function () {
                      return config('scraper.platforms.flipkart.enabled', true);
                  });
@@ -68,15 +68,30 @@ class Kernel extends ConsoleKernel
         // Other platforms - every 2 days
         $schedule->command('scraper:run vijaysales')
                  ->weekly(1, 4, '05:00') // Monday and Thursday
-                 ->withoutOverlapping(1800);
+                 ->withoutOverlapping(14400);
 
         $schedule->command('scraper:run reliancedigital')
                  ->weekly(2, 5, '05:00') // Tuesday and Friday
-                 ->withoutOverlapping(1800);
+                 ->withoutOverlapping(14400);
 
         $schedule->command('scraper:run croma')
                  ->weekly(3, 6, '05:00') // Wednesday and Saturday
-                 ->withoutOverlapping(1800);
+                 ->withoutOverlapping(14400);
+        // blinkit - more frequent due to high volume 
+        $schedule->command('scraper:run blinkit')
+                 ->daily()
+                 ->at('01:00')
+                 ->withoutOverlapping(14400)
+                 ->when(function () {
+                     return config('scraper.platforms.blinkit.enabled', true);
+                 });
+        $schedule->command('scraper:run bigbasket')
+                 ->daily()
+                 ->at('01:00')
+                 ->withoutOverlapping(14400)
+                 ->when(function () {
+                     return config('scraper.platforms.bigbasket.enabled', true);
+                 });
 
         // Emergency cleanup if disk space is low
         $schedule->call(function () {

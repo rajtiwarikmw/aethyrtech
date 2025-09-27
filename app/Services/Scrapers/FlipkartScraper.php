@@ -33,41 +33,41 @@ class FlipkartScraper extends BaseScraper
     /**
      * Override scrape method to implement browser fallback for 403 errors
      */
-    public function scrape(array $categoryUrls): array
-    {
-        $this->stats = [
-            'products_found' => 0,
-            'products_updated' => 0,
-            'products_added' => 0,
-            'products_deactivated' => 0,
-            'errors_count' => 0
-        ];
+    // public function scrape(array $categoryUrls): array
+    // {
+    //     $this->stats = [
+    //         'products_found' => 0,
+    //         'products_updated' => 0,
+    //         'products_added' => 0,
+    //         'products_deactivated' => 0,
+    //         'errors_count' => 0
+    //     ];
 
-        Log::info("Starting Flipkart scraping with HTTP requests", [
-            'platform' => $this->platform,
-            'categories' => count($categoryUrls)
-        ]);
+    //     Log::info("Starting Flipkart scraping with HTTP requests", [
+    //         'platform' => $this->platform,
+    //         'categories' => count($categoryUrls)
+    //     ]);
 
-        $httpSuccess = false;
+    //     $httpSuccess = false;
 
-        foreach ($categoryUrls as $categoryUrl) {
-            // Try HTTP first
-            if ($this->tryHttpScraping($categoryUrl)) {
-                $httpSuccess = true;
-            } else {
-                // If HTTP fails, switch to browser automation
-                Log::warning("HTTP scraping failed for Flipkart, switching to browser automation");
-                $this->useJavaScript = true;
-                $this->scrapeCategoryWithBrowser($categoryUrl);
-            }
+    //     foreach ($categoryUrls as $categoryUrl) {
+    //         // Try HTTP first
+    //         if ($this->tryHttpScraping($categoryUrl)) {
+    //             $httpSuccess = true;
+    //         } else {
+    //             // If HTTP fails, switch to browser automation
+    //             Log::warning("HTTP scraping failed for Flipkart, switching to browser automation");
+    //             $this->useJavaScript = true;
+    //             $this->scrapeCategoryWithBrowser($categoryUrl);
+    //         }
 
-            if ($this->isExecutionTimeLimitReached()) {
-                break;
-            }
-        }
+    //         if ($this->isExecutionTimeLimitReached()) {
+    //             break;
+    //         }
+    //     }
 
-        return $this->stats;
-    }
+    //     return $this->stats;
+    // }
 
     /**
      * Try HTTP scraping with enhanced anti-blocking measures
@@ -139,11 +139,10 @@ class FlipkartScraper extends BaseScraper
         try {
             // Flipkart product links patterns
             $selectors = [
-                '._1fQZEK a',
-                '._4rR01T a',
-                '[data-id] a',
-                '.s1Q9rs a',
-                '._2kHMtA a'
+                'a[href*="/p/"]',
+                'a.VJA3rP', 
+                'a.wjcEIp'
+
             ];
 
             foreach ($selectors as $selector) {
@@ -154,7 +153,7 @@ class FlipkartScraper extends BaseScraper
                         if (strpos($href, 'http') !== 0) {
                             $href = 'https://www.flipkart.com' . $href;
                         }
-
+                        $href = explode('?', $href)[0];
                         // Only include Product product pages
                         if (strpos($href, '/p/') !== false) {
                             $productUrls[] = $href;
@@ -203,11 +202,21 @@ class FlipkartScraper extends BaseScraper
 
             // Description
             $data['description'] = $this->extractDescription($crawler);
+            $data["brand"] = $this->extractBrand($crawler);
+            $data["model_name"] = $this->extractModelName($crawler);
+            $data["color"] = $this->extractColour($crawler);
+            $data["weight"] = $this->extractItemWeight($crawler);
+            $data["dimensions"] = $this->extractProductDimensions($crawler);
+            $data["manufacturer"] = $this->extractManufacturer($crawler);
+            $data["video_urls"] = $this->extractVideoUrls($crawler);
+            $data["category"] = $this->extractCategory($crawler);
+            $data["seller_name"] = $this->extractSellerName($crawler);
 
             // Prices
             $priceData = $this->extractPrices($crawler);
             $data['price'] = $priceData['price'];
             $data['sale_price'] = $priceData['sale_price'];
+            $data["currency_code"] = $this->extractCurrencyCode($crawler);
 
             // Offers
             $data['offers'] = $this->extractOffers($crawler);
@@ -220,10 +229,6 @@ class FlipkartScraper extends BaseScraper
             $data['rating'] = $ratingData['rating'];
             $data['review_count'] = $ratingData['review_count'];
 
-            // Brand and model
-            $brandData = $this->extractBrandAndModel($crawler);
-            $data['brand'] = $brandData['brand'];
-            $data['model_name'] = $brandData['model'];
 
             // Specifications
             $specs = $this->extractSpecifications($crawler);
@@ -300,7 +305,7 @@ class FlipkartScraper extends BaseScraper
     {
         $descriptions = [];
 
-        // Key features
+        // Key features (existing selectors)
         $crawler->filter('._1mXcCf li, ._3k-BhJ li')->each(function (Crawler $node) use (&$descriptions) {
             $text = $this->cleanText($node->text());
             if ($text && strlen($text) > 10) {
@@ -308,67 +313,106 @@ class FlipkartScraper extends BaseScraper
             }
         });
 
-        // Product description
-        $productDesc = $crawler->filter('._1mXcCf, ._3WHvuP')->first();
-        if ($productDesc->count() > 0) {
-            $descriptions[] = $this->cleanText($productDesc->text());
-        }
+        // Product description - new selector
+        $crawler->filter('.Xbd0Sd ._4gvKMe p')->each(function (Crawler $node) use (&$descriptions) {
+            $text = $this->cleanText($node->text());
+            if ($text && strlen($text) > 20) {
+                $descriptions[] = $text;
+            }
+        });
 
-        return !empty($descriptions) ? implode('. ', $descriptions) : null;
+        return !empty($descriptions) ? implode(' ', $descriptions) : null;
     }
+
 
     /**
      * Extract prices
      */
     private function extractPrices(Crawler $crawler): array
     {
-        $prices = ['price' => null, 'sale_price' => null];
+        $prices = ["price" => null, "sale_price" => null];
 
-        // Current price selectors
-        $priceSelectors = [
-            '._30jeq3._16Jk6d',
-            '._1_WHN1',
-            '._3I9_wc._2p6lqe',
-            '._25b18c'
+        // Current price (sale price)
+        $salePriceSelectors = [
+            ".Nx9bqj.CxhGGd"
         ];
 
-        foreach ($priceSelectors as $selector) {
+        foreach ($salePriceSelectors as $selector) {
             $element = $crawler->filter($selector)->first();
             if ($element->count() > 0) {
-                $price = $this->extractPrice($element->text());
+                $priceText = $this->cleanText($element->text());
+                $price = $this->extractPrice($priceText);
                 if ($price) {
-                    $prices['sale_price'] = $price;
+                    $prices["sale_price"] = $price;
                     break;
                 }
             }
         }
 
-        // Original price (if on sale)
-        $originalPriceSelectors = [
-            '._3I9_wc._27UcVY',
-            '._14Nx8E',
-            '.yRaY8j'
+        // Original price (MRP or regular price)
+        $mrpPriceSelectors = [
+            ".hl05eU .yRaY8j"
         ];
-
-        foreach ($originalPriceSelectors as $selector) {
+            
+        foreach ($mrpPriceSelectors as $selector) {
             $element = $crawler->filter($selector)->first();
             if ($element->count() > 0) {
-                $price = $this->extractPrice($element->text());
+                $priceText = $this->cleanText($element->text());
+                $price = $this->extractPrice($priceText);
                 if ($price) {
-                    $prices['price'] = $price;
+                    $prices["price"] = $price;       // This is the regular price
                     break;
                 }
             }
         }
 
-        // If no original price found, use sale price as regular price
-        if (!$prices['price'] && $prices['sale_price']) {
-            $prices['price'] = $prices['sale_price'];
-            $prices['sale_price'] = null;
-        }
 
         return $prices;
     }
+
+
+     
+    private function extractCurrencyCode(Crawler $crawler): ?string
+    {
+        // Possible currency symbol nodes (Amazon + Flipkart + fallback)
+        $selectors = [
+            '.Nx9bqj.CxhGGd',
+            '.yRaY8j.A6+E6v'
+        ];
+
+        $symbol = null;
+
+        foreach ($selectors as $selector) {
+            $node = $crawler->filter($selector)->first();
+            if ($node->count() > 0) {
+                // Flipkart prices include ₹ in the text, so extract first char
+                $text = trim($node->text());
+                $symbol = mb_substr($text, 0, 1); 
+                break;
+            }
+        }
+
+        if (!$symbol) {
+            return null;
+        }
+
+        // Map symbols to ISO currency codes
+        $currencyMap = [
+            '₹' => 'INR',
+            '$' => 'USD',
+            '£' => 'GBP',
+            '€' => 'EUR',
+            '¥' => 'JPY',
+            '₩' => 'KRW',
+            '₽' => 'RUB',
+            '₫' => 'VND',
+            '฿' => 'THB',
+            '₦' => 'NGN',
+        ];
+
+        return $currencyMap[$symbol] ?? $symbol; // fallback to raw symbol
+    }
+
 
     /**
      * Extract offers and discounts
@@ -378,18 +422,10 @@ class FlipkartScraper extends BaseScraper
         $offers = [];
 
         // Discount percentage
-        $discount = $crawler->filter('._3Ay6Sb span')->first();
+        $discount = $crawler->filter('.hl05eU .UkUFwK.WW8yVX')->first();
         if ($discount->count() > 0) {
             $offers[] = $this->cleanText($discount->text());
         }
-
-        // Special offers
-        $crawler->filter('._3j4Zjq, ._16FRp0, .yN+eNk')->each(function (Crawler $node) use (&$offers) {
-            $text = $this->cleanText($node->text());
-            if ($text) {
-                $offers[] = $text;
-            }
-        });
 
         return !empty($offers) ? implode('; ', $offers) : null;
     }
@@ -426,11 +462,8 @@ class FlipkartScraper extends BaseScraper
     {
         $data = ['rating' => null, 'review_count' => 0];
 
-        // Rating
         $ratingSelectors = [
-            '._3LWZlK',
-            '._1lRcqv',
-            '.hGSR34'
+            '.XQDdHH'
         ];
 
         foreach ($ratingSelectors as $selector) {
@@ -444,66 +477,33 @@ class FlipkartScraper extends BaseScraper
             }
         }
 
-        // Review count
         $reviewSelectors = [
-            '._2_R_DZ',
-            '._13vcmD',
-            '.row._2afbiS'
+            '.Wphh3N span'
         ];
 
         foreach ($reviewSelectors as $selector) {
             $element = $crawler->filter($selector)->first();
             if ($element->count() > 0) {
-                $reviewCount = $this->extractReviewCount($element->text());
-                if ($reviewCount > 0) {
-                    $data['review_count'] = $reviewCount;
-                    break;
+                $text = trim($element->text());
+
+                // Flipkart format: "278 Ratings & 23 Reviews"
+                if (preg_match('/(\d+)\s+Ratings.*?(\d+)\s+Reviews/', $text, $matches)) {
+                    $data['review_count'] = (int)$matches[2];
+                } else {
+                    $reviewCount = $this->extractReviewCount($text);
+                    if ($reviewCount > 0) {
+                        $data['review_count'] = $reviewCount;
+                    }
                 }
+
+                break;
             }
         }
 
         return $data;
     }
 
-    /**
-     * Extract brand and model
-     */
-    private function extractBrandAndModel(Crawler $crawler): array
-    {
-        $data = ['brand' => null, 'model' => null];
 
-        // Try to extract from product title
-        $title = $this->extractProductName($crawler);
-        if ($title) {
-            // Common Product brands
-            $brands = ['HP', 'Dell', 'Lenovo', 'ASUS', 'Acer', 'Apple', 'MSI', 'Samsung', 'LG', 'Sony', 'Toshiba'];
-
-            foreach ($brands as $brand) {
-                if (stripos($title, $brand) !== false) {
-                    $data['brand'] = $brand;
-                    break;
-                }
-            }
-        }
-
-        // Try to extract from specifications table
-        $crawler->filter('._1s_Smc tr, ._21lJbe tr')->each(function (Crawler $row) use (&$data) {
-            $cells = $row->filter('td');
-            if ($cells->count() >= 2) {
-                $label = $this->cleanText($cells->eq(0)->text());
-                $value = $this->cleanText($cells->eq(1)->text());
-
-                if (stripos($label, 'brand') !== false) {
-                    $data['brand'] = $value;
-                }
-                if (stripos($label, 'model') !== false) {
-                    $data['model'] = $value;
-                }
-            }
-        });
-
-        return $data;
-    }
 
     /**
      * Extract technical specifications
@@ -540,32 +540,18 @@ class FlipkartScraper extends BaseScraper
     /**
      * Extract product images
      */
-    private function extractImages(Crawler $crawler): ?array
+     private function extractImages(Crawler $crawler): ?array
     {
         $images = [];
 
-        // Main product images
-        $crawler->filter('._396cs4 img, ._2r_T1I img, .q6DClP img')->each(function (Crawler $node) use (&$images) {
-            $src = $node->attr('src') ?: $node->attr('data-src');
+        $crawler->filter('ul.ZqtVYK li img._0DkuPH')->each(function (Crawler $node) use (&$images) {
+            $src = $node->attr('src');
             if ($src && strpos($src, 'http') === 0) {
-                // Convert to higher resolution if possible
-                $src = str_replace('/128/128/', '/832/832/', $src);
-                $src = str_replace('/200/200/', '/832/832/', $src);
                 $images[] = $src;
             }
         });
 
-        // Alternative image selectors
-        if (empty($images)) {
-            $crawler->filter('._2_AcLJ img, ._20Gt85 img')->each(function (Crawler $node) use (&$images) {
-                $src = $node->attr('src') ?: $node->attr('data-src');
-                if ($src && strpos($src, 'http') === 0) {
-                    $images[] = $src;
-                }
-            });
-        }
-
-        return !empty($images) ? array_unique($images) : null;
+        return !empty($images) ? array_values(array_unique($images)) : null;
     }
 
     /**
@@ -593,4 +579,200 @@ class FlipkartScraper extends BaseScraper
 
         return !empty($variants) ? $variants : null;
     }
+
+    // Product Attributes
+    private function extractBrand(Crawler $crawler): ?string
+    {
+        $brand = null;
+
+        // Flipkart style table
+        $crawler->filter('table._0ZhAN9 tr')->each(function (Crawler $row) use (&$brand) {
+            $cells = $row->filter('td');
+            if ($cells->count() >= 2) {
+                $label = strtolower(trim($cells->eq(0)->text()));
+                if (strpos($label, 'brand') !== false) {
+                    // Brand value inside <ul><li>
+                    $brandText = $cells->eq(1)->filter('li')->first();
+                    if ($brandText->count() > 0) {
+                        $brand = trim($brandText->text());
+                    } else {
+                        $brand = trim($cells->eq(1)->text());
+                    }
+                }
+            }
+        });
+
+        return $brand;
+    }
+
+    private function extractModelName(Crawler $crawler): ?string
+    {
+        $model = null;
+
+        // Flipkart style table
+        $crawler->filter('table._0ZhAN9 tr')->each(function (Crawler $row) use (&$model) {
+            $cells = $row->filter('td');
+            if ($cells->count() >= 2) {
+                $label = strtolower(trim($cells->eq(0)->text()));
+                if (strpos($label, 'model name') !== false) {
+                    // Model value inside <ul><li>
+                    $modelText = $cells->eq(1)->filter('li')->first();
+                    if ($modelText->count() > 0) {
+                        $model = trim($modelText->text());
+                    } else {
+                        $model = trim($cells->eq(1)->text());
+                    }
+                }
+            }
+        });
+
+        return $model;
+    }
+
+    private function extractColour(Crawler $crawler): ?string
+    {
+        $colour = null;
+
+        // Flipkart style table
+        $crawler->filter('table._0ZhAN9 tr')->each(function (Crawler $row) use (&$colour) {
+            $cells = $row->filter('td');
+            if ($cells->count() >= 2) {
+                $label = strtolower(trim($cells->eq(0)->text()));
+                if (strpos($label, 'color') !== false || strpos($label, 'colour') !== false) {
+                    // Value inside <ul><li>
+                    $colorText = $cells->eq(1)->filter('li')->first();
+                    if ($colorText->count() > 0) {
+                        $colour = trim($colorText->text());
+                    } else {
+                        $colour = trim($cells->eq(1)->text());
+                    }
+                }
+            }
+        });
+
+        return $colour;
+    }
+
+    private function extractItemWeight(Crawler $crawler): ?string
+    {
+        $weight = null;
+
+        $crawler->filter('table._0ZhAN9 tr')->each(function (Crawler $row) use (&$weight) {
+            $cells = $row->filter('td');
+            if ($cells->count() >= 2) {
+                $label = strtolower(trim($cells->eq(0)->text()));
+                if (strpos($label, 'weight') !== false) {
+                    // Value inside <ul><li>
+                    $weightNode = $cells->eq(1)->filter('li')->first();
+                    if ($weightNode->count() > 0) {
+                        $weight = trim($weightNode->text());
+                    } else {
+                        $weight = trim($cells->eq(1)->text());
+                    }
+                }
+            }
+        });
+
+        return $weight;
+    }
+
+    private function extractProductDimensions(Crawler $crawler): ?string
+    {
+        $dimensions = [];
+
+        $crawler->filter('table._0ZhAN9 tr')->each(function (Crawler $row) use (&$dimensions) {
+            $cells = $row->filter('td');
+            if ($cells->count() >= 2) {
+                $label = strtolower(trim($cells->eq(0)->text()));
+                $valueNode = $cells->eq(1)->filter('li')->first();
+                $value = $valueNode->count() > 0 ? trim($valueNode->text()) : trim($cells->eq(1)->text());
+
+                if (strpos($label, 'height') !== false) {
+                    $dimensions['height'] = $value;
+                } elseif (strpos($label, 'width') !== false) {
+                    $dimensions['width'] = $value;
+                } elseif (strpos($label, 'depth') !== false) {
+                    $dimensions['depth'] = $value;
+                }
+            }
+        });
+
+        return !empty($dimensions) ? implode(' x ', $dimensions) : null; // e.g., "19.7 cm x 37.5 cm x 34.7 cm"
+    }
+
+    private function extractManufacturer(Crawler $crawler): ?string
+    {
+        // Look for <ul><li> containing manufacturer info
+        $liNode = $crawler->filter('ul li.H+ugqS')->first();
+
+        if ($liNode->count() > 0) {
+            return $this->cleanText($liNode->text());
+        }
+
+        return null;
+    }
+
+    private function extractVideoUrls(Crawler $crawler): ?array
+    {
+        $videoUrls = [];
+        // Look for video elements on the page
+        $crawler->filter("video source, video")->each(function (Crawler $node) use (&$videoUrls) {
+            $src = $node->attr("src");
+            if ($src) {
+                $videoUrls[] = $src;
+            }
+        });
+
+        // Look for video links in specific sections (e.g., product gallery)
+        $crawler->filter("#altImages .videoThumbnail img")->each(function (Crawler $node) use (&$videoUrls) {
+            $dataVideoUrl = $node->attr("data-video-url");
+            if ($dataVideoUrl) {
+                $videoUrls[] = $dataVideoUrl;
+            }
+        });
+
+        // Look for embedded video iframes (e.g., YouTube)
+        $crawler->filter("iframe[src*='youtube.com'], iframe[src*='player.vimeo.com']")->each(function (Crawler $node) use (&$videoUrls) {
+            $src = $node->attr("src");
+            if ($src) {
+                $videoUrls[] = $src;
+            }
+        });
+
+        return !empty($videoUrls) ? array_unique($videoUrls) : null;
+    }
+
+    private function extractCategory(Crawler $crawler): ?string
+    {
+        $categories = [];
+
+        // Target all breadcrumb links
+        $crawler->filter('div._7dPnhA > div.r2CdBx > a.R0cyWM')->each(function (Crawler $node) use (&$categories) {
+            $text = trim($node->text());
+            if ($text) {
+                $categories[] = $text;
+            }
+        });
+
+        // Remove first (Home) and last (product) if there are enough items
+        if (count($categories) > 2) {
+            array_shift($categories); // remove first
+            array_pop($categories);   // remove last
+        }
+
+        return !empty($categories) ? implode(" > ", $categories) : null;
+    }
+
+    private function extractSellerName(Crawler $crawler): ?string
+    {
+        $sellerNode = $crawler->filter('#sellerName span span')->first(); // target inner span with name
+        if ($sellerNode->count() > 0) {
+            return $this->cleanText($sellerNode->text());
+        }
+
+        return null;
+    }
+
+    
+
 }
