@@ -26,22 +26,22 @@ return [
             'name' => 'Amazon India',
             'base_url' => 'https://www.amazon.in',
             'category_urls' => [
-                //'https://www.amazon.in/s?k=printers&rh=n%3A1375443031&ref=nb_sb_noss',
-                'https://www.amazon.in/s?k=Cartridge&rh=n%3A14784020031&ref=nb_sb_noss'
+                'https://www.amazon.in/s?k=printers&rh=n%3A1375443031&ref=nb_sb_noss',
+                //'https://www.amazon.in/s?k=Cartridge&rh=n%3A14784020031&ref=nb_sb_noss'
             ]
         ],
         'flipkart' => [
             'name' => 'Flipkart',
             'base_url' => 'https://www.flipkart.com',
             'category_urls' => [
-                'https://www.flipkart.com/computers/computer-peripherals/printers-inks/printers/pr?sid=6bo%2Fffn%2Ft64',
+                'https://www.flipkart.com/computers/computer-peripherals/printers-inks/pr?sid=6bo,tia,ffn&otracker=categorytree',
             ]
         ],
         'vijaysales' => [
             'name' => 'VijaySales',
             'base_url' => 'https://www.vijaysales.com',
             'category_urls' => [
-                'https://www.vijaysales.com/c/laptops',
+                'https://www.vijaysales.com/c/printers',
             ]
         ],
         'reliancedigital' => [
@@ -83,7 +83,7 @@ return [
     'schedule' => [
         'enabled' => env('SCRAPER_SCHEDULE_ENABLED', true),
         'interval_hours' => env('SCRAPER_INTERVAL_HOURS', 168), // 7 days
-        'max_execution_time' => env('SCRAPER_MAX_EXECUTION_TIME', 14400), // 4 hour
+        'max_execution_time' => env('SCRAPER_MAX_EXECUTION_TIME', 43200), // 12 hour
     ],
 
     /*

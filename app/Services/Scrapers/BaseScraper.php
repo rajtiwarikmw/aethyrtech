@@ -27,14 +27,14 @@ abstract class BaseScraper
     ];
 
     protected float $startTime;
-    protected int $maxExecutionTime = 14400; // 1 hour default limit
+    protected int $maxExecutionTime = 43200; // 1 hour default limit
     protected ?\App\Services\ProxyRotator $proxyRotator = null;
 
     public function __construct(string $platform)
     {
         $this->platform = $platform;
         $this->startTime = microtime(true);
-        $this->maxExecutionTime = config('scraper.schedule.max_execution_time', 14400); // Use config value
+        $this->maxExecutionTime = config('scraper.schedule.max_execution_time', 43200); // Use config value
 
         // Set PHP execution time limit
         set_time_limit($this->maxExecutionTime + 300); // Add 5 minutes buffer
@@ -136,7 +136,7 @@ abstract class BaseScraper
     protected function scrapeCategoryWithPagination(string $categoryUrl): void
     {
         $currentPage = 1;
-        $maxPages = $this->paginationConfig['max_pages'] ?? 150;
+        $maxPages = $this->paginationConfig['max_pages'] ?? 250;
         $noProductsCount = 0;
         $maxNoProductsPages = 3;
         $consecutiveErrors = 0;

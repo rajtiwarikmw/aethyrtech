@@ -22,7 +22,7 @@ class ScrapeCommand extends Command
                             {platform? : Platform to scrape (amazon, flipkart, vijaysales, reliancedigital, croma, blinkit, bigbasket, all)}
                             {--force : Force scraping even if recently scraped}
                             {--limit=70 : Limit number of products per platform}
-                            {--timeout=14400 : Maximum execution time in seconds}';
+                            {--timeout=43200 : Maximum execution time in seconds}';
 
     /**
      * The console command description.

@@ -306,7 +306,7 @@ class FlipkartScraper extends BaseScraper
         $descriptions = [];
 
         // Key features (existing selectors)
-        $crawler->filter('._1mXcCf li, ._3k-BhJ li')->each(function (Crawler $node) use (&$descriptions) {
+        $crawler->filter('._1mXcCf li, ._3k-BhJ li, .w9jEaj')->each(function (Crawler $node) use (&$descriptions) {
             $text = $this->cleanText($node->text());
             if ($text && strlen($text) > 10) {
                 $descriptions[] = $text;
@@ -314,7 +314,7 @@ class FlipkartScraper extends BaseScraper
         });
 
         // Product description - new selector
-        $crawler->filter('.Xbd0Sd ._4gvKMe p')->each(function (Crawler $node) use (&$descriptions) {
+        $crawler->filter('.Xbd0Sd ._4gvKMe p, .w9jEaj')->each(function (Crawler $node) use (&$descriptions) {
             $text = $this->cleanText($node->text());
             if ($text && strlen($text) > 20) {
                 $descriptions[] = $text;

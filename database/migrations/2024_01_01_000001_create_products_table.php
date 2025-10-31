@@ -23,6 +23,7 @@ return new class extends Migration
             $table->string('seller_name', 255)->nullable();
             $table->string('product_badge', 50)->nullable();
             $table->boolean('amazon_choice')->default(false);
+            $table->boolean('fulfilled_by')->default(false);
             $table->boolean('bestseller')->default(false);
             $table->text('offers')->nullable();
             $table->json('detailed_offers')->nullable();

@@ -50,6 +50,9 @@ class Product extends Model
         'seller_name',
         'product_badge',
         'amazon_choice',
+        'fulfilled_by',
+        'delivery_date',
+        'delivery_price',
         'bestseller'
     ];
 
@@ -66,6 +69,7 @@ class Product extends Model
         'additional_information' => 'array',
         'is_active' => 'boolean',
         'amazon_choice' => 'boolean',
+        'fulfilled_by' => 'boolean',
         'bestseller' => 'boolean',
         'scraped_date' => 'datetime'
     ];
@@ -142,6 +146,10 @@ class Product extends Model
             'description',
             'price',
             'sale_price',
+            'seller_name',
+            'product_badge',
+            'bestseller',
+            'category',
             'offers',
             'inventory_status',
             'rating',
@@ -150,7 +158,12 @@ class Product extends Model
             'model_name',
             'color',
             'image_urls',
-            'video_urls'
+            'video_urls',
+            'fulfilled_by',
+            'amazon_choice',
+            'highlights',
+            'delivery_price',
+            'delivery_date'
         ];
 
         foreach ($fieldsToCheck as $field) {

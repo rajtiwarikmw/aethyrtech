@@ -14,10 +14,10 @@ class AmazonScraper extends BaseScraper
         $this->useJavaScript = false; // Amazon works with regular HTTP requests
         $this->paginationConfig = [
             'type' => 'regular',
-            'max_pages' => 150, // Increased from 100 to handle more pages
+            'max_pages' => 250, // Increased from 100 to handle more pages
             'page_param' => 'page',
             'has_next_selector' => '.a-pagination .a-last:not(.a-disabled)',
-            'max_consecutive_errors' => 100, // Allow more errors before stopping
+            'max_consecutive_errors' => 500, // Allow more errors before stopping
             'delay_between_pages' => [3, 7], // Longer delays to avoid rate limiting
             'retry_failed_pages' => true,
             'max_retries_per_page' => 3
@@ -41,6 +41,7 @@ class AmazonScraper extends BaseScraper
             $selectors = [
                 'div[data-cy="title-recipe"] > a',
                 'a.a-link-normal.s-no-outline',
+                'div[data-cy="title-recipe"] > a.a-link-normal',
             ];
 
             foreach ($selectors as $selector) {
@@ -104,6 +105,7 @@ class AmazonScraper extends BaseScraper
             $data["color"] = $this->extractColour($crawler);
             $data["weight"] = $this->extractItemWeight($crawler);
             $data["dimensions"] = $this->extractProductDimensions($crawler);
+            $data["highlights"] = $this->extractHighlights($crawler);
             $data["manufacturer"] = $this->extractManufacturer($crawler);
             $data["image_urls"] = $this->extractImages($crawler); // Renamed from image_urls
             $data["video_urls"] = $this->extractVideoUrls($crawler);
@@ -112,6 +114,9 @@ class AmazonScraper extends BaseScraper
             $data["release_date"] = $this->extractReleaseDate($crawler);
             $data["technical_details"] = $this->extractTechnicalDetails($crawler);
             $data["additional_information"] = $this->extractAdditionalInformation($crawler);
+            $data["fulfilled_by"] = $this->extractFulfilledBy($crawler);
+            $data["delivery_price"] = $this->extractDeliveryPrice($crawler);
+            $data["delivery_date"] = $this->extractDeliveryDate($crawler);
 
             // Amazon Price Attributes
             $priceData = $this->extractPrices($crawler);
@@ -135,8 +140,9 @@ class AmazonScraper extends BaseScraper
             $data["bestseller"] = $this->extractAmazonsChoiceBadge($crawler);
 
             $data["variation_attributes"] = $this->extractVariationAttributes($crawler);
+           
 
-            // Sanitize all data
+            // Sanitize all data  
             $data = DataSanitizer::sanitizeProductData($data);
 
             Log::debug("Extracted Amazon product data", [
@@ -205,24 +211,19 @@ class AmazonScraper extends BaseScraper
      */
     private function extractDescription(Crawler $crawler): ?string
     {
-        $descriptions = [];
+        // Target the product description section
+        $node = $crawler->filter('#productDescription p span, #productDescription p');
 
-        // Feature bullets
-        $crawler->filter('#feature-bullets ul li span')->each(function (Crawler $node) use (&$descriptions) {
-            $text = $this->cleanText($node->text());
-            if ($text && strlen($text) > 10) {
-                $descriptions[] = $text;
+        if ($node->count() > 0) {
+            $description = $this->cleanText($node->text());
+            if (!empty($description)) {
+                return $description;
             }
-        });
-
-        // Product description
-        $productDesc = $crawler->filter('#productDescription p')->first();
-        if ($productDesc->count() > 0) {
-            $descriptions[] = $this->cleanText($productDesc->text());
         }
 
-        return !empty($descriptions) ? implode('. ', $descriptions) : null;
+        return null;
     }
+
 
     /**
      * Extract prices
@@ -761,6 +762,64 @@ class AmazonScraper extends BaseScraper
 
         return null;
     }
+
+    private function extractFulfilledBy(Crawler $crawler): ?string
+    {
+        $fulfilled = $crawler->filter('.a-icon-text-fba')->first();
+
+        if ($fulfilled->count() > 0) {
+            return trim($fulfilled->text());
+        }
+
+        return null;
+    }
+
+    private function extractDeliveryPrice(Crawler $crawler): ?string
+    {
+        $node = $crawler->filter('#deliveryBlockMessage span[data-csa-c-delivery-price]')->first();
+
+        if ($node->count() > 0) {
+            $price = $node->attr('data-csa-c-delivery-price');
+            if (!empty($price)) {
+                return $this->cleanText($price);
+            }
+        }
+
+        return null;
+    }
+
+    private function extractDeliveryDate(Crawler $crawler): ?string
+    {
+        $node = $crawler->filter('#deliveryBlockMessage span[data-csa-c-delivery-time]')->first();
+
+        if ($node->count() > 0) {
+            $date = $node->attr('data-csa-c-delivery-time');
+            if (!empty($date)) {
+                return $this->cleanText($date);
+            }
+        }
+
+        return null;
+    }
+
+    private function extractHighlights(Crawler $crawler): ?string
+    {
+        $highlights = [];
+
+        // Feature bullets
+        $crawler->filter('#feature-bullets ul li span')->each(function (Crawler $node) use (&$highlights) {
+            $text = $this->cleanText($node->text());
+            if ($text && strlen($text) > 10) {
+                $highlights[] = $text;
+            }
+        });
+
+        return !empty($highlights) ? implode('. ', $highlights) : null;
+    }
+
+
+
+
 
     
 

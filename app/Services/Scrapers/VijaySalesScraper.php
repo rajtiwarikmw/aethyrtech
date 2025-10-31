@@ -123,6 +123,10 @@ class VijaySalesScraper extends BaseScraper
             $data['product_url'] = $productUrl;
             $data['title'] = $this->extractProductName($crawler);
             $data['description'] = $this->extractDescription($crawler);
+            $data["brand"] = $this->extractBrand($crawler);
+            $data["model_name"] = $this->extractModelName($crawler);
+            $data['highlights'] = $this->extractHighlights($crawler);
+            $data["technical_details"] = $this->extractTechnicalDetails($crawler);            
 
             $priceData = $this->extractPrices($crawler);
             $data['price'] = $priceData['price'];
@@ -134,10 +138,6 @@ class VijaySalesScraper extends BaseScraper
             $ratingData = $this->extractRatingAndReviews($crawler);
             $data['rating'] = $ratingData['rating'];
             $data['review_count'] = $ratingData['review_count'];
-
-            $brandData = $this->extractBrandAndModel($crawler);
-            $data['brand'] = $brandData['brand'];
-            $data['model_name'] = $brandData['model'];
 
             $specs = $this->extractSpecifications($crawler);
             $data = array_merge($data, $specs);
@@ -198,7 +198,8 @@ class VijaySalesScraper extends BaseScraper
             '.page-title h1',
             '.product-name h1',
             '.product-title',
-            'h1.title'
+            '.productFullDetail__title .productFullDetail__productName span[role="name"]',
+            '.productFullDetail__productName span[role="name"]',
         ];
 
         foreach ($selectors as $selector) {
@@ -210,6 +211,7 @@ class VijaySalesScraper extends BaseScraper
 
         return null;
     }
+
 
     private function extractDescription(Crawler $crawler): ?string
     {
@@ -229,11 +231,10 @@ class VijaySalesScraper extends BaseScraper
     {
         $prices = ['price' => null, 'sale_price' => null];
 
+        // Sale price (current price shown on site)
         $priceSelectors = [
-            '.price-current',
-            '.special-price',
-            '.price-final',
-            '.price .amount'
+            '.product__price--offer-wrapper .product__price--price[data-final-price]',
+            '.product__price--price[data-final-price]'
         ];
 
         foreach ($priceSelectors as $selector) {
@@ -247,10 +248,10 @@ class VijaySalesScraper extends BaseScraper
             }
         }
 
+        // Original MRP price
         $originalPriceSelectors = [
-            '.price-old',
-            '.regular-price',
-            '.price-was'
+            '.product__price--offer-wrapper .product__price--mrp span[data-mrp]',
+            '.product__price--mrp span[data-mrp]'
         ];
 
         foreach ($originalPriceSelectors as $selector) {
@@ -264,27 +265,30 @@ class VijaySalesScraper extends BaseScraper
             }
         }
 
-        if (!$prices['price'] && $prices['sale_price']) {
-            $prices['price'] = $prices['sale_price'];
-            $prices['sale_price'] = null;
-        }
-
         return $prices;
     }
+
+
 
     private function extractOffers(Crawler $crawler): ?string
     {
         $offers = [];
 
-        $crawler->filter('.discount-percent, .offer-text, .promotion')->each(function (Crawler $node) use (&$offers) {
-            $text = $this->cleanText($node->text());
-            if ($text) {
-                $offers[] = $text;
-            }
-        });
+        $crawler->filter('.product__price--discount-label')
+            ->each(function (Crawler $node) use (&$offers) {
+                $text = $this->cleanText($node->text());
+                if ($text) {
+                    $offers[] = $text;
+                }
+            });
+
+        // Remove duplicates
+        $offers = array_unique($offers);
 
         return !empty($offers) ? implode('; ', $offers) : null;
     }
+
+
 
     private function extractAvailability(Crawler $crawler): ?string
     {
@@ -309,61 +313,22 @@ class VijaySalesScraper extends BaseScraper
     {
         $data = ['rating' => null, 'review_count' => 0];
 
-        $ratingSelectors = [
-            '.rating-value',
-            '.star-rating',
-            '.review-rating'
-        ];
-
-        foreach ($ratingSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $rating = $this->extractRating($element->text());
-                if ($rating) {
-                    $data['rating'] = $rating;
-                    break;
-                }
-            }
+        // Extract rating from data-rating-summary
+        $ratingElement = $crawler->filter('.product__title--reviews-star')->first();
+        if ($ratingElement->count() > 0) {
+            $data['rating'] = (float) $ratingElement->attr('data-rating-summary');
         }
 
-        $reviewSelectors = [
-            '.review-count',
-            '.reviews-count',
-            '.total-reviews'
-        ];
-
-        foreach ($reviewSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $reviewCount = $this->extractReviewCount($element->text());
-                if ($reviewCount > 0) {
-                    $data['review_count'] = $reviewCount;
-                    break;
-                }
-            }
+        // Extract review count from span text
+        $reviewElement = $crawler->filter('.product__title--stats span')->first();
+        if ($reviewElement->count() > 0) {
+            $data['review_count'] = $this->extractReviewCount($reviewElement->text());
         }
 
         return $data;
     }
 
-    private function extractBrandAndModel(Crawler $crawler): array
-    {
-        $data = ['brand' => null, 'model' => null];
 
-        $title = $this->extractProductName($crawler);
-        if ($title) {
-            $brands = ['HP', 'Dell', 'Lenovo', 'ASUS', 'Acer', 'Apple', 'MSI', 'Samsung', 'LG', 'Sony', 'Toshiba'];
-
-            foreach ($brands as $brand) {
-                if (stripos($title, $brand) !== false) {
-                    $data['brand'] = $brand;
-                    break;
-                }
-            }
-        }
-
-        return $data;
-    }
 
     private function extractSpecifications(Crawler $crawler): array
     {
@@ -388,7 +353,7 @@ class VijaySalesScraper extends BaseScraper
     {
         $images = [];
 
-        $crawler->filter('.product-image img, .gallery-image img, .main-image img')->each(function (Crawler $node) use (&$images) {
+        $crawler->filter('.thumbnail__image')->each(function (Crawler $node) use (&$images) {
             $src = $node->attr('src') ?: $node->attr('data-src');
             if ($src && strpos($src, 'http') === 0) {
                 $images[] = $src;
@@ -397,6 +362,7 @@ class VijaySalesScraper extends BaseScraper
 
         return !empty($images) ? array_unique($images) : null;
     }
+
 
     private function extractVariants(Crawler $crawler): ?array
     {
@@ -411,4 +377,74 @@ class VijaySalesScraper extends BaseScraper
 
         return !empty($variants) ? $variants : null;
     }
+
+    private function extractBrand(Crawler $crawler): ?string
+    {
+        $brand = null;
+
+        $crawler->filter('.productspecification .panel-list-key')->each(function (Crawler $keyNode) use (&$brand) {
+            if (trim(strtoupper($keyNode->text())) === 'BRAND') {
+                $valueNode = $keyNode->siblings()->filter('.panel-list-value')->first();
+                if ($valueNode->count() > 0) {
+                    $brand = trim($valueNode->text());
+                }
+            }
+        });
+
+        return $brand;
+    }
+
+    private function extractModelName(Crawler $crawler): ?string
+    {
+        $modelName = null;
+
+        $crawler->filter('.productspecification .panel-list-key')->each(function (Crawler $keyNode) use (&$modelName) {
+            if (trim(strtoupper($keyNode->text())) === 'MODEL NAME') {
+                $valueNode = $keyNode->siblings()->filter('.panel-list-value')->first();
+                if ($valueNode->count() > 0) {
+                    $modelName = trim($valueNode->text());
+                }
+            }
+        });
+
+        return $modelName;
+    }
+
+    private function extractTechnicalDetails(Crawler $crawler): ?array
+    {
+        $details = [];
+
+        // Loop through all keys inside productspecification
+        $crawler->filter('.productspecification .panel-list-key')->each(function (Crawler $keyNode) use (&$details) {
+            $valueNode = $keyNode->siblings()->filter('.panel-list-value')->first();
+            if ($valueNode->count() > 0) {
+                $key = trim($keyNode->text());
+                $value = trim($valueNode->text());
+                if ($key && $value) {
+                    $details[$key] = $value;
+                }
+            }
+        });
+
+        return !empty($details) ? $details : null;
+    }
+    
+    private function extractHighlights(Crawler $crawler): ?string
+    {
+        $highlights = [];
+
+        // Loop through each <li> inside the key features list
+        $crawler->filter('.product__keyfeatures--list li')->each(function (Crawler $node) use (&$highlights) {
+            $text = trim($node->text());
+            if ($text) {
+                $highlights[] = $text;
+            }
+        });
+
+        return !empty($highlights) ? implode('. ', $highlights) : null;
+    }
+
+
+
+
 }

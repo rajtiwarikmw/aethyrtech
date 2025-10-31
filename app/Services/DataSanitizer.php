@@ -31,6 +31,9 @@ class DataSanitizer
         $sanitized['category'] = self::sanitizeString($data['category'] ?? null);
         $sanitized['currency_code'] = self::sanitizeString($data['currency_code'] ?? null);
         $sanitized['seller_name'] = self::sanitizeText($data['seller_name'] ?? null);
+        $sanitized['highlights'] = self::sanitizeText($data['highlights'] ?? null);
+        $sanitized['delivery_price'] = self::sanitizeText($data['delivery_price'] ?? null);
+        $sanitized['delivery_date'] = self::sanitizeText($data['delivery_date'] ?? null);
 
         // Numeric fields
         $sanitized['price'] = self::sanitizePrice($data['price'] ?? null);
@@ -48,6 +51,7 @@ class DataSanitizer
         $sanitized['is_active'] = isset($data['is_active']) ? (bool) $data['is_active'] : true;
         $sanitized['bestseller'] = !empty($data['bestseller']);
         $sanitized['amazon_choice'] = !empty($data['amazon_choice']);
+        $sanitized['fulfilled_by'] = !empty($data['fulfilled_by']);
 
 
         // Remove empty values
