@@ -26,8 +26,12 @@ return [
             'name' => 'Amazon India',
             'base_url' => 'https://www.amazon.in',
             'category_urls' => [
-                'https://www.amazon.in/s?k=printers&rh=n%3A1375443031&ref=nb_sb_noss',
-                //'https://www.amazon.in/s?k=Cartridge&rh=n%3A14784020031&ref=nb_sb_noss'
+                'https://www.amazon.in/s?k=printer&i=computers&rh=n%3A976392031%2Cp_123%3A233970%257C242668%257C308445%257C359121&dc&crid=FA8FJ3BLCAQH&qid=1762351572&rnid=91049095031&sprefix=printer%2Ccomputers%2C268&ref=sr_nr_p_123_5&ds=v1%3Au9fHF8NkLhS5YXyr6yWNrTnqZL%2FbyZSwRt8sh1RGVF0',
+                //'https://www.amazon.in/s?k=Cartridge&rh=n%3A14784020031&ref=nb_sb_noss',
+                //'https://www.amazon.in/s?i=computers&srs=28122718031&rh=n%3A28122718031&s=popularity-rank&fs=true&qid=1762094386&xpid=vKzKzSYniQ-XU&ref=sr_pg_1',
+                //'https://www.amazon.in/s?i=computers&srs=28122719031&rh=n%3A28122719031&s=popularity-rank&fs=true&ref=lp_28122719031_sar',
+                //'https://www.amazon.in/s?i=computers&srs=28122720031&rh=n%3A28122720031&s=popularity-rank&fs=true&ref=lp_28122720031_sar',
+                //'https://www.amazon.in/s?i=computers&srs=28122721031&rh=n%3A28122721031&s=popularity-rank&fs=true&ref=lp_28122721031_sar'
             ]
         ],
         'flipkart' => [
@@ -48,14 +52,14 @@ return [
             'name' => 'Reliance Digital',
             'base_url' => 'https://www.reliancedigital.in',
             'category_urls' => [
-                'https://www.reliancedigital.in/collection/apple-laptops?page_no=1&page_size=12&page_type=number',
+                'https://www.reliancedigital.in/products?q=printer&page_no=1&page_size=12&page_type=number',
             ]
         ],
         'croma' => [
             'name' => 'Croma',
             'base_url' => 'https://www.croma.com',
             'category_urls' => [
-                'https://www.croma.com/computers-tablets/laptops/c/20',
+                'https://www.croma.com/computers-tablets/printers/c/31',
             ]
         ],
         'blinkit' => [
@@ -99,7 +103,7 @@ return [
         'max_brand_length' => 100,
         'max_model_length' => 200,
         'price_range' => [
-            'min' => 10,  // Minimum product price in INR
+            'min' => 300,  // Minimum product price in INR
             'max' => 1600000  // Maximum product price in INR
         ]
     ],

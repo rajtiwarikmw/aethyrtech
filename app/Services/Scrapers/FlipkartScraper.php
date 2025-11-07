@@ -281,11 +281,18 @@ class FlipkartScraper extends BaseScraper
     private function extractProductName(Crawler $crawler): ?string
     {
         $selectors = [
-            '.B_NuCI',
-            '._35KyD6',
-            '.x2Jnpn',
-            'h1 span',
-            '.yhZ1nd'
+            '.B_NuCI',                    // Main title class
+            '._35KyD6',                   // Alternative title class
+            '.x2Jnpn',                    // Another variant
+            '.yhZ1nd',                    // Yet another class
+            'h1.yhZ1nd',                  // H1 with class
+            'h1 span.B_NuCI',             // H1 span combination
+            'span.B_NuCI',                // Direct span
+            'h1 span',                    // Generic h1 span
+            'h1',                         // Just h1
+            '[data-reactid] h1',          // React-based h1
+            '.title',                     // Generic title class
+            '[class*="title"]',          // Any class containing "title"
         ];
 
         foreach ($selectors as $selector) {

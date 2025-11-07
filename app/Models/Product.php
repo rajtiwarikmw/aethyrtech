@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Product extends Model
 {
@@ -75,6 +76,22 @@ class Product extends Model
     ];
 
     /**
+     * Get the reviews for the product
+     */
+    public function reviews(): HasMany
+    {
+        return $this->hasMany(Review::class);
+    }
+
+    /**
+     * Get the rankings for the product
+     */
+    public function rankings(): HasMany
+    {
+        return $this->hasMany(ProductRanking::class);
+    }
+
+    /**
      * Scope to filter by platform
      */
     public function scopePlatform(Builder $query, string $platform): Builder
@@ -105,6 +122,11 @@ class Product extends Model
     {
         return self::where('platform', $platform)
             ->where('sku', $sku)
+            ->where(function ($query) {
+                $query->whereNull('scraped_date')
+                    ->orWhere('scraped_date', '>=', now()->subDays(2));
+            })
+            ->orderByDesc('scraped_date')
             ->first();
     }
 

@@ -184,10 +184,17 @@ class AmazonScraper extends BaseScraper
     private function extractProductName(Crawler $crawler): ?string
     {
         $selectors = [
-            '#productTitle',                   // Amazon’s main ID
+            '#productTitle',                   // Amazon's main ID
+            'span#productTitle',               // Direct span
             'h1#title span#productTitle',      // More explicit fallback
+            'h1 span#productTitle',            // H1 with span
+            '#title span',                     // Title div with span
+            '.product-title-word-break',       // Alternative class
             '.product-title',
-            'h1.a-size-large span'
+            'h1.a-size-large span',
+            'h1 span.a-size-large',
+            '[data-feature-name="title"] h1',
+            '#titleSection h1',
         ];
 
         foreach ($selectors as $selector) {
@@ -598,7 +605,7 @@ class AmazonScraper extends BaseScraper
             }
         }
 
-        return !empty($categories) ? implode(" > ", $categories) : null;
+        return !empty($categories) ? implode(", ", $categories) : null;
     }
 
     private function extractBSR(Crawler $crawler): ?int

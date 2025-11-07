@@ -231,38 +231,79 @@ class VijaySalesScraper extends BaseScraper
     {
         $prices = ['price' => null, 'sale_price' => null];
 
-        // Sale price (current price shown on site)
+        // Sale price (current price shown on site) - try multiple selectors
         $priceSelectors = [
             '.product__price--offer-wrapper .product__price--price[data-final-price]',
-            '.product__price--price[data-final-price]'
+            '.product__price--price[data-final-price]',
+            '[data-final-price]',
+            '.product__price--price',
+            '.price-final',
+            '.final-price',
+            '.offer-price',
+            '.selling-price',
+            '[class*="price"][class*="offer"]',
+            '[class*="final"][class*="price"]',
         ];
 
         foreach ($priceSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $price = $this->extractPrice($element->text());
-                if ($price) {
-                    $prices['sale_price'] = $price;
-                    break;
+            try {
+                $element = $crawler->filter($selector);
+                if ($element->count() > 0) {
+                    $text = $element->first()->text();
+                    $price = $this->extractPrice($text);
+                    if ($price && $price > 0) {
+                        $prices['sale_price'] = $price;
+                        Log::debug("Extracted VijaySales sale price using selector: {$selector}", ['price' => $price]);
+                        break;
+                    }
                 }
+            } catch (\Exception $e) {
+                continue;
             }
         }
 
-        // Original MRP price
+        // Original MRP price - try multiple selectors
         $originalPriceSelectors = [
             '.product__price--offer-wrapper .product__price--mrp span[data-mrp]',
-            '.product__price--mrp span[data-mrp]'
+            '.product__price--mrp span[data-mrp]',
+            '[data-mrp]',
+            '.product__price--mrp',
+            '.price-mrp',
+            '.mrp-price',
+            '.original-price',
+            '[class*="mrp"]',
+            '[class*="original"][class*="price"]',
         ];
 
         foreach ($originalPriceSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $price = $this->extractPrice($element->text());
-                if ($price) {
-                    $prices['price'] = $price;
-                    break;
+            try {
+                $element = $crawler->filter($selector);
+                if ($element->count() > 0) {
+                    $text = $element->first()->text();
+                    $price = $this->extractPrice($text);
+                    if ($price && $price > 0) {
+                        $prices['price'] = $price;
+                        Log::debug("Extracted VijaySales MRP using selector: {$selector}", ['price' => $price]);
+                        break;
+                    }
                 }
+            } catch (\Exception $e) {
+                continue;
             }
+        }
+
+        // If we only got sale_price, use it as price too
+        if (!$prices['price'] && $prices['sale_price']) {
+            $prices['price'] = $prices['sale_price'];
+        }
+
+        // If we only got price, use it as sale_price too
+        if (!$prices['sale_price'] && $prices['price']) {
+            $prices['sale_price'] = $prices['price'];
+        }
+
+        if (!$prices['price'] && !$prices['sale_price']) {
+            Log::warning("Failed to extract VijaySales prices with any selector");
         }
 
         return $prices;

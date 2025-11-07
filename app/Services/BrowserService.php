@@ -59,8 +59,8 @@ class BrowserService
                 if ($attempts === 0) {
                     $browsershot->waitUntilNetworkIdle();
                 } else {
-                    // Fallback: just wait for load event
-                    $browsershot->waitForFunction('document.readyState === "complete"', 30000);
+                    // Fallback: just wait for load event - removed waitForFunction due to compatibility issues
+                    $browsershot->setDelay(3000); // Wait 3 seconds instead
                 }
 
                 $html = $browsershot->bodyHtml();

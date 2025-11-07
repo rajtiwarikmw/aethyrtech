@@ -25,3 +25,4 @@ Route::prefix('dashboard')->name('dashboard.')->group(function () {
     Route::get('/api/stats', [DashboardController::class, 'apiStats'])->name('api.stats');
 });
 
+require __DIR__.'/web_scraping_urls.php';

@@ -162,20 +162,42 @@ class CromaScraper extends BaseScraper
     private function extractProductName(Crawler $crawler): ?string
     {
         $selectors = [
-            '.pdp-product-name',
-            '.product-title h1',
-            '.cp-product-name',
-            'h1.title',
-            '.product-name'
+            '.pdp-product-name',                      // Main Croma product name class
+            '.product-title h1',                      // Product title in h1
+            '.cp-product-name',                       // Alternative class
+            'h1.title',                               // H1 with title class
+            '.product-name',                          // Generic product name
+            'h1.pdp-title',                           // PDP title
+            '.pdp-title',                             // PDP title without h1
+            '[data-testid="product-title"]',         // Data attribute
+            '.product-details h1',                    // Product details h1
+            'h1[class*="product"]',                  // Any h1 with product in class
+            'h1[class*="title"]',                    // Any h1 with title in class
+            'h1',                                     // Just h1 as last resort
+            '.product-info h1',                       // Product info h1
+            '[itemprop="name"]',                     // Schema.org name
         ];
 
         foreach ($selectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                return $this->cleanText($element->text());
+            try {
+                $element = $crawler->filter($selector);
+                if ($element->count() > 0) {
+                    $text = $element->first()->text();
+                    $text = $this->cleanText($text);
+                    
+                    // Validate meaningful text
+                    if (!empty($text) && strlen($text) > 3) {
+                        Log::debug("Extracted Croma title using selector: {$selector}", ['title' => $text]);
+                        return $text;
+                    }
+                }
+            } catch (\Exception $e) {
+                // Continue to next selector
+                continue;
             }
         }
 
+        Log::warning("Failed to extract Croma product title with any selector");
         return null;
     }
 
