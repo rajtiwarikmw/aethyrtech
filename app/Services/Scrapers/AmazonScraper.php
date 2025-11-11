@@ -183,30 +183,51 @@ class AmazonScraper extends BaseScraper
      */
     private function extractProductName(Crawler $crawler): ?string
     {
-        $selectors = [
-            '#productTitle',                   // Amazon's main ID
-            'span#productTitle',               // Direct span
-            'h1#title span#productTitle',      // More explicit fallback
-            'h1 span#productTitle',            // H1 with span
-            '#title span',                     // Title div with span
-            '.product-title-word-break',       // Alternative class
-            '.product-title',
-            'h1.a-size-large span',
-            'h1 span.a-size-large',
-            '[data-feature-name="title"] h1',
-            '#titleSection h1',
-        ];
+        try {
+            $selectors = [
+                '#productTitle',                   
+                'h1#title span#productTitle',
+                'h1#title span',
+                '#title span#productTitle',
+                '#title span',
+                '.product-title-word-break',
+                '.product-title',
+                'h1.a-size-large span',
+                'h1 span.a-size-large',
+                '[data-feature-name="title"] h1',
+                '#titleSection h1 span',
+                '#titleSection h1',
+                'span#productTitle',
+            ];
 
-        foreach ($selectors as $selector) {
-            $element = $crawler->filter($selector);
-            if ($element->count() > 0) {
-                $text = $this->cleanText($element->text());
+            foreach ($selectors as $selector) {
+                $element = $crawler->filter($selector);
+                if ($element->count() > 0) {
+                    // Try both text() and html() to be safe
+                    $text = $this->cleanText($element->text(''));
+                    if (!$text) {
+                        $text = $this->cleanText($element->html(''));
+                    }
 
-                // Remove duplicate whitespace & newlines
-                $text = preg_replace('/\s+/', ' ', $text);
+                    // Remove duplicate whitespace, newlines, and HTML artifacts
+                    $text = preg_replace('/\s+/', ' ', $text);
+                    $text = trim(strip_tags($text));
 
+                    if ($text && strlen($text) > 3) {
+                        return $text;
+                    }
+                }
+            }
+
+            // Fallback: sometimes title exists in meta tags
+            $metaTitle = $crawler->filter('meta[name="title"], meta[property="og:title"]');
+            if ($metaTitle->count() > 0) {
+                $text = $this->cleanText($metaTitle->first()->attr('content'));
                 return trim($text);
             }
+
+        } catch (\Exception $e) {
+            // Log or ignore
         }
 
         return null;

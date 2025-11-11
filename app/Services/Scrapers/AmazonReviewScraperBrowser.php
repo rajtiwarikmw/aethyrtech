@@ -4,14 +4,13 @@ namespace App\Services\Scrapers;
 
 use App\Models\Product;
 use App\Models\Review;
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
+use App\Services\BrowserService;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\DomCrawler\Crawler;
 
-class AmazonReviewScraper
+class AmazonReviewScraperBrowser
 {
-    protected Client $httpClient;
+    protected BrowserService $browserService;
     protected array $stats = [
         'products_processed' => 0,
         'reviews_found' => 0,
@@ -22,28 +21,7 @@ class AmazonReviewScraper
 
     public function __construct()
     {
-        $this->initializeHttpClient();
-    }
-
-    /**
-     * Initialize HTTP client with proper configuration
-     */
-    protected function initializeHttpClient(): void
-    {
-        $this->httpClient = new Client([
-            'timeout' => config('scraper.timeout', 30),
-            'headers' => [
-                'User-Agent' => config('scraper.user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'),
-                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language' => 'en-US,en;q=0.5',
-                'Accept-Encoding' => 'gzip, deflate',
-                'Connection' => 'keep-alive',
-                'Upgrade-Insecure-Requests' => '1',
-            ],
-            'verify' => false,
-            'allow_redirects' => true,
-            'http_errors' => false
-        ]);
+        $this->browserService = new BrowserService();
     }
 
     /**
@@ -51,7 +29,7 @@ class AmazonReviewScraper
      */
     public function scrapeReviews(?array $productIds = null, ?int $limit = null): array
     {
-        Log::info("Starting Amazon review scraping", [
+        Log::info("Starting Amazon review scraping (Browser mode)", [
             'product_ids' => $productIds,
             'limit' => $limit
         ]);
@@ -79,7 +57,7 @@ class AmazonReviewScraper
                 $this->stats['products_processed']++;
 
                 // Add delay between products to avoid rate limiting
-                $this->randomDelay(2, 4);
+                $this->randomDelay(3, 6);
             } catch (\Exception $e) {
                 Log::error("Failed to scrape reviews for product", [
                     'product_id' => $product->id,
@@ -90,7 +68,7 @@ class AmazonReviewScraper
             }
         }
 
-        Log::info("Amazon review scraping completed", $this->stats);
+        Log::info("Amazon review scraping completed (Browser mode)", $this->stats);
 
         return $this->stats;
     }
@@ -106,33 +84,32 @@ class AmazonReviewScraper
             'title' => $product->title
         ]);
 
-        // Get the reviews URL from the product URL
-        $reviewsUrl = $this->getReviewsUrl($product->product_url, $product->sku);
-
-        if (!$reviewsUrl) {
-            Log::warning("Could not generate reviews URL for product", [
-                'product_id' => $product->id,
-                'product_url' => $product->product_url
-            ]);
-            return;
-        }
-
-        // Scrape multiple pages of reviews
-        $maxPages = 5; // Scrape up to 5 pages of reviews per product
+        $maxPages = 5; // Maximum pages to scrape per product
+        
         for ($page = 1; $page <= $maxPages; $page++) {
             try {
-                $pageUrl = $page === 1 ? $reviewsUrl : $reviewsUrl . "&pageNumber={$page}";
+                $url = $this->buildReviewUrl($product->sku, $page);
                 
-                Log::info("Fetching reviews page", [
+                Log::info("Fetching reviews page (Browser mode)", [
                     'product_id' => $product->id,
                     'page' => $page,
-                    'url' => $pageUrl
+                    'url' => $url
                 ]);
 
-                $html = $this->fetchPage($pageUrl);
+                // Use browser service to fetch page
+                $html = $this->browserService->getPageContent($url, 5);
                 
                 if (!$html) {
                     Log::warning("Failed to fetch reviews page", [
+                        'product_id' => $product->id,
+                        'page' => $page
+                    ]);
+                    break;
+                }
+
+                // Check if redirected to login page
+                if ($this->isLoginPage($html)) {
+                    Log::warning("Redirected to login page, stopping", [
                         'product_id' => $product->id,
                         'page' => $page
                     ]);
@@ -156,7 +133,7 @@ class AmazonReviewScraper
                 }
 
                 // Add delay between pages
-                $this->randomDelay(3, 5);
+                $this->randomDelay(2, 4);
             } catch (\Exception $e) {
                 Log::error("Error scraping reviews page", [
                     'product_id' => $product->id,
@@ -169,44 +146,41 @@ class AmazonReviewScraper
     }
 
     /**
-     * Generate reviews URL from product URL
+     * Check if page is a login page
      */
-    protected function getReviewsUrl(string $productUrl, string $sku): ?string
+    protected function isLoginPage(string $html): bool
     {
-        // Amazon reviews URL format: https://www.amazon.in/product-reviews/{ASIN}/
-        if (preg_match('/amazon\.in/', $productUrl)) {
-            return "https://www.amazon.in/dp/{$sku}";
+        $loginIndicators = [
+            'ap_signin_form',
+            'Sign-In',
+            'Sign in to continue',
+            'Enter your email or mobile phone number',
+            'ap_email',
+            'ap_password',
+        ];
+
+        foreach ($loginIndicators as $indicator) {
+            if (stripos($html, $indicator) !== false) {
+                return true;
+            }
         }
 
-        return null;
+        return false;
     }
 
     /**
-     * Fetch page content
+     * Build review URL for a product
      */
-    protected function fetchPage(string $url): ?string
+    protected function buildReviewUrl(string $asin, int $page = 1): string
     {
-        try {
-            $response = $this->httpClient->get($url);
-            $statusCode = $response->getStatusCode();
+        $baseUrl = 'https://www.amazon.in/product-reviews/' . $asin;
+        $params = [
+            'ie' => 'UTF8',
+            'reviewerType' => 'all_reviews',
+            'pageNumber' => $page,
+        ];
 
-            if ($statusCode === 200) {
-                return $response->getBody()->getContents();
-            }
-
-            Log::warning("Non-200 status code received", [
-                'url' => $url,
-                'status_code' => $statusCode
-            ]);
-
-            return null;
-        } catch (RequestException $e) {
-            Log::error("HTTP request failed", [
-                'url' => $url,
-                'error' => $e->getMessage()
-            ]);
-            return null;
-        }
+        return $baseUrl . '?' . http_build_query($params);
     }
 
     /**
@@ -313,16 +287,9 @@ class AmazonReviewScraper
     protected function extractReviewerName(Crawler $reviewNode): ?string
     {
         try {
-            $selectors = [
-                'span.a-profile-name',
-                'div.a-profile-content span',
-            ];
-
-            foreach ($selectors as $selector) {
-                $element = $reviewNode->filter($selector);
-                if ($element->count() > 0) {
-                    return trim($element->first()->text());
-                }
+            $element = $reviewNode->filter('.a-profile-name');
+            if ($element->count() > 0) {
+                return trim($element->first()->text());
             }
         } catch (\Exception $e) {
             // Ignore
@@ -337,13 +304,12 @@ class AmazonReviewScraper
     protected function extractReviewerProfileUrl(Crawler $reviewNode): ?string
     {
         try {
-            $element = $reviewNode->filter('a.a-profile');
+            $element = $reviewNode->filter('.a-profile');
             if ($element->count() > 0) {
-                $href = $element->attr('href');
-                if ($href && strpos($href, 'http') !== 0) {
-                    $href = 'https://www.amazon.in' . $href;
+                $href = $element->first()->attr('href');
+                if ($href) {
+                    return 'https://www.amazon.in' . $href;
                 }
-                return $href;
             }
         } catch (\Exception $e) {
             // Ignore
@@ -379,26 +345,27 @@ class AmazonReviewScraper
     protected function extractReviewTitle(Crawler $reviewNode): ?string
     {
         try {
-            // Target the review title container
-            $link = $reviewNode->filter('a[data-hook="review-title"]');
-            if ($link->count() > 0) {
-                // Get all spans inside the link, ignore star rating text
-                $spans = $link->filter('span')->reduce(function (Crawler $node) {
-                    return !$node->matches('.a-icon-alt');
-                });
+            $selectors = [
+                'a[data-hook="review-title"] span:not(.a-icon-alt)',
+                'h5[data-hook="review-title"] span',
+                'a[data-hook="review-title"]',
+            ];
 
-                if ($spans->count() > 0) {
-                    $title = trim($spans->last()->text());
+            foreach ($selectors as $selector) {
+                $element = $reviewNode->filter($selector);
+                if ($element->count() > 0) {
+                    $title = trim($element->first()->text());
+                    // Remove rating text if present
+                    $title = preg_replace('/^\d+\.?\d*\s+out of\s+\d+\s+stars\s*/i', '', $title);
                     return $title ?: null;
                 }
             }
         } catch (\Exception $e) {
-            // Ignore errors
+            // Ignore
         }
 
         return null;
     }
-
 
     /**
      * Extract review text
@@ -463,8 +430,8 @@ class AmazonReviewScraper
             $element = $reviewNode->filter('span[data-hook="helpful-vote-statement"]');
             if ($element->count() > 0) {
                 $text = $element->first()->text();
-                // Extract number from "123 people found this helpful" format
-                if (preg_match('/(\d+)\s+people?/', $text, $matches)) {
+                // Extract number from "X people found this helpful" format
+                if (preg_match('/(\d+)/', $text, $matches)) {
                     return (int) $matches[1];
                 }
             }
@@ -518,44 +485,45 @@ class AmazonReviewScraper
     protected function saveReview(array $reviewData): void
     {
         try {
-            // Check if review already exists
-            $existingReview = Review::findByProductAndReviewId(
-                $reviewData['product_id'],
-                $reviewData['review_id']
+            $review = Review::updateOrCreate(
+                [
+                    'product_id' => $reviewData['product_id'],
+                    'review_id' => $reviewData['review_id'],
+                ],
+                [
+                    'reviewer_name' => $reviewData['reviewer_name'],
+                    'reviewer_profile_url' => $reviewData['reviewer_profile_url'],
+                    'rating' => $reviewData['rating'],
+                    'review_title' => $reviewData['review_title'],
+                    'review_text' => $reviewData['review_text'],
+                    'review_date' => $reviewData['review_date'],
+                    'verified_purchase' => $reviewData['verified_purchase'],
+                    'helpful_count' => $reviewData['helpful_count'],
+                    'review_images' => $reviewData['review_images'] ? json_encode($reviewData['review_images']) : null,
+                    'variant_info' => $reviewData['variant_info'],
+                ]
             );
 
-            if ($existingReview) {
-                // Update if data has changed
-                if ($existingReview->updateIfChanged($reviewData)) {
-                    $this->stats['reviews_updated']++;
-                    Log::debug("Updated review", [
-                        'review_id' => $reviewData['review_id']
-                    ]);
-                }
-            } else {
-                // Create new review
-                Review::create($reviewData);
+            if ($review->wasRecentlyCreated) {
                 $this->stats['reviews_added']++;
-                Log::debug("Added new review", [
-                    'review_id' => $reviewData['review_id']
-                ]);
+            } else {
+                $this->stats['reviews_updated']++;
             }
         } catch (\Exception $e) {
             Log::error("Failed to save review", [
-                'review_id' => $reviewData['review_id'] ?? 'unknown',
+                'review_id' => $reviewData['review_id'],
                 'error' => $e->getMessage()
             ]);
-            $this->stats['errors_count']++;
         }
     }
 
     /**
-     * Random delay to avoid rate limiting
+     * Random delay between requests
      */
-    protected function randomDelay(int $min = 2, int $max = 5): void
+    protected function randomDelay(int $min, int $max): void
     {
-        $delay = rand($min * 1000000, $max * 1000000);
-        usleep($delay);
+        $seconds = rand($min, $max);
+        sleep($seconds);
     }
 
     /**
