@@ -129,7 +129,16 @@ class AmazonScraper extends BaseScraper
             $ratingData = $this->extractRatingAndReviews($crawler);
             $data["rating"] = $ratingData["rating"];
             $data["review_count"] = $ratingData["review_count"];
+            $RatingHistogram = $this->extractRatingHistogram($crawler);
+            $data["rating_1_star_percent"] = $RatingHistogram['rating_1_star_percent'];
+            $data["rating_2_star_percent"] = $RatingHistogram['rating_2_star_percent'];
+            $data["rating_3_star_percent"] = $RatingHistogram['rating_3_star_percent'];
+            $data["rating_4_star_percent"] = $RatingHistogram['rating_4_star_percent'];
+            $data["rating_5_star_percent"] = $RatingHistogram['rating_5_star_percent'];
 
+            // Extract offer countdown
+            $data['countdown'] = $this->extractCountdown($crawler);
+            $data['customers_say'] = $this->extractCustomersSay($crawler);
             // product Specific Specs (from previous implementation, ensure mapping)
             $specs = $this->extractSpecifications($crawler); // This extracts generic product specs
             $data = array_merge($data, $specs);
@@ -844,6 +853,125 @@ class AmazonScraper extends BaseScraper
 
         return !empty($highlights) ? implode('. ', $highlights) : null;
     }
+
+    private function extractCustomersSay(Crawler $crawler): ?string
+    {
+        $selectors = [
+            'div[data-testid="overall-summary"] span',
+            'div[data-testid="overall-summary"]',
+            '[data-hook="cr-insights-widget-summary"]',
+            '.cr-widget-ReviewsSummary',
+            '.cr-insights-widget-summary',
+        ];
+
+        foreach ($selectors as $selector) {
+            $node = $crawler->filter($selector)->first();
+
+            if ($node->count() > 0) {
+                $text = $this->cleanText($node->text());
+
+                if (!empty($text) && strlen($text) > 20) {
+                    return $text;
+                }
+            }
+        }
+
+        return null;
+    }
+
+
+    private function extractRatingHistogram(Crawler $crawler): array
+    {
+        $ratings = [
+            'rating_5_star_percent' => null,
+            'rating_4_star_percent' => null,
+            'rating_3_star_percent' => null,
+            'rating_2_star_percent' => null,
+            'rating_1_star_percent' => null,
+        ];
+
+        // Select the right-side percentage values inside histogram
+        $nodes = $crawler->filter('#histogramTable span[aria-hidden="true"]');
+
+        if ($nodes->count() >= 5) {
+            // Extract the LAST 5 numbers (because the first 5 are labels "5 star 4 star ...")
+            $values = [];
+
+            $nodes->each(function (Crawler $node) use (&$values) {
+                $text = trim($node->text());
+
+                // Capture only values like 54%
+                if (preg_match('/\d+%/', $text, $match)) {
+                    $values[] = intval(str_replace('%', '', $match[0]));
+                }
+            });
+
+            // Must have exactly 5 values
+            if (count($values) >= 5) {
+                $values = array_slice($values, -5); // take last 5
+
+                $ratings['rating_5_star_percent'] = $values[0];
+                $ratings['rating_4_star_percent'] = $values[1];
+                $ratings['rating_3_star_percent'] = $values[2];
+                $ratings['rating_2_star_percent'] = $values[3];
+                $ratings['rating_1_star_percent'] = $values[4];
+            }
+        }
+
+        return $ratings;
+    }
+
+
+    private function extractCountdown(Crawler $crawler): ?string
+    {
+        try {
+            // Selectors for offer countdown/deal text
+            $selectors = [
+                '#dealBadge',
+                '.deal-badge',
+                '[data-testid="deal-badge"]',
+                '#deal_expiry_timer',
+                '.dealTimer',
+                '#deal-timer',
+                '.a-size-base.a-color-price',
+                '[id*="timer"]',
+                '[class*="timer"]',
+                '[class*="countdown"]',
+                '.dealBadge',
+            ];
+
+            foreach ($selectors as $selector) {
+                $element = $crawler->filter($selector)->first();
+                if ($element->count() > 0) {
+                    $text = trim($element->text());
+                    
+                    // Look for time-related keywords
+                    if (preg_match('/(ends|expires|left|remaining|hours?|days?|minutes?|deal|offer)/i', $text)) {
+                        //Log::debug("Extracted countdown text", ['countdown' => $text]);
+                        return $text;
+                    }
+                }
+            }
+
+            // Also check for deal text in spans
+            $dealSpans = $crawler->filter('span:contains("Deal"), span:contains("offer"), span:contains("ends")');
+            if ($dealSpans->count() > 0) {
+                $text = trim($dealSpans->first()->text());
+                if (strlen($text) > 0 && strlen($text) < 255) {
+                    //Log::debug("Extracted countdown from span", ['countdown' => $text]);
+                    return $text;
+                }
+            }
+
+            //Log::debug("No countdown found");
+            return null;
+        } catch (\Exception $e) {
+           // Log::error("Failed to extract countdown", ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    
 
 
 

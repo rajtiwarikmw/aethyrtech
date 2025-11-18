@@ -207,10 +207,13 @@ class FlipkartScraper extends BaseScraper
             $data["color"] = $this->extractColour($crawler);
             $data["weight"] = $this->extractItemWeight($crawler);
             $data["dimensions"] = $this->extractProductDimensions($crawler);
+            $data["highlights"] = $this->extractHighlights($crawler);
             $data["manufacturer"] = $this->extractManufacturer($crawler);
             $data["video_urls"] = $this->extractVideoUrls($crawler);
             $data["category"] = $this->extractCategory($crawler);
             $data["seller_name"] = $this->extractSellerName($crawler);
+            $data["delivery_price"] = $this->extractDeliveryPrice($crawler);
+            $data["delivery_date"] = $this->extractDeliveryDate($crawler);
 
             // Prices
             $priceData = $this->extractPrices($crawler);
@@ -564,27 +567,33 @@ class FlipkartScraper extends BaseScraper
     /**
      * Extract product variants
      */
-    private function extractVariants(Crawler $crawler): ?array
+    private function extractVariants(Crawler $crawler): ?string
     {
         $variants = [];
 
-        // Color variants
-        $crawler->filter('._1KOMV6 li, ._3V2wfe li')->each(function (Crawler $node) use (&$variants) {
-            $title = $node->attr('title') ?: $node->text();
-            if ($title) {
-                $variants[] = ['type' => 'color', 'value' => $this->cleanText($title)];
+        // Flipkart color variants (each li > a)
+        $crawler->filter('div.WGBwfw ul.hSEbzK li a')->each(function (Crawler $node) use (&$variants) {
+            $href = $node->attr('href') ?: '';
+
+            if (empty($href)) {
+                return;
+            }
+
+            // Match SKU from /p/{sku}
+            if (preg_match('#/p/([^/?#]+)#', $href, $m)) {
+                $variants[] = $m[1];
+            }
+            // Or fallback to pid= if structure is different
+            elseif (preg_match('/[?&]pid=([^&]+)/', $href, $m2)) {
+                $variants[] = $m2[1];
             }
         });
 
-        // Size/configuration variants
-        $crawler->filter('._21Ahn- li, ._1fGeJ5 li')->each(function (Crawler $node) use (&$variants) {
-            $text = $this->cleanText($node->text());
-            if ($text) {
-                $variants[] = ['type' => 'configuration', 'value' => $text];
-            }
-        });
+        // Remove duplicates and empty values
+        $variants = array_filter(array_unique($variants));
 
-        return !empty($variants) ? $variants : null;
+        // Return comma-separated SKUs or null
+        return !empty($variants) ? implode(',', $variants) : null;
     }
 
     // Product Attributes
@@ -640,25 +649,41 @@ class FlipkartScraper extends BaseScraper
     {
         $colour = null;
 
-        // Flipkart style table
-        $crawler->filter('table._0ZhAN9 tr')->each(function (Crawler $row) use (&$colour) {
-            $cells = $row->filter('td');
-            if ($cells->count() >= 2) {
-                $label = strtolower(trim($cells->eq(0)->text()));
-                if (strpos($label, 'color') !== false || strpos($label, 'colour') !== false) {
-                    // Value inside <ul><li>
-                    $colorText = $cells->eq(1)->filter('li')->first();
-                    if ($colorText->count() > 0) {
-                        $colour = trim($colorText->text());
-                    } else {
-                        $colour = trim($cells->eq(1)->text());
-                    }
+        try {
+            // Try to capture color text inside Flipkart’s color section
+            $crawler->filter('div.WGBwfw ul.hSEbzK li .V3Zflw')->each(function (Crawler $node) use (&$colour) {
+                $text = trim($node->text());
+                if (!empty($text)) {
+                    // Collect all color options
+                    $colourList[] = $text;
                 }
-            }
-        });
+            });
 
-        return $colour;
+            if (!empty($colourList)) {
+                // Join multiple colors (e.g., "Black, White")
+                $colour = implode(', ', array_unique($colourList));
+            }
+
+            // Fallback: check color in product specification table
+            if (!$colour) {
+                $crawler->filter('table._0ZhAN9 tr')->each(function (Crawler $row) use (&$colour) {
+                    $cells = $row->filter('td');
+                    if ($cells->count() >= 2) {
+                        $label = strtolower(trim($cells->eq(0)->text()));
+                        if (strpos($label, 'color') !== false) {
+                            $colour = trim($cells->eq(1)->text());
+                        }
+                    }
+                });
+            }
+
+        } catch (\Exception $e) {
+            Log::warning('Colour extraction failed', ['error' => $e->getMessage()]);
+        }
+
+        return $colour ? $this->cleanText($colour) : null;
     }
+
 
     private function extractItemWeight(Crawler $crawler): ?string
     {
@@ -767,7 +792,7 @@ class FlipkartScraper extends BaseScraper
             array_pop($categories);   // remove last
         }
 
-        return !empty($categories) ? implode(" > ", $categories) : null;
+        return !empty($categories) ? implode(", ", $categories) : null;
     }
 
     private function extractSellerName(Crawler $crawler): ?string
@@ -779,6 +804,70 @@ class FlipkartScraper extends BaseScraper
 
         return null;
     }
+
+    private function extractDeliveryDate(Crawler $crawler): ?string
+    {
+        // Flipkart delivery date — inside span.Y8v7Fl
+        $node = $crawler->filter('div.hVvnXm span.Y8v7Fl')->first();
+
+        if ($node->count() > 0) {
+            $date = trim($node->text());
+            if (!empty($date)) {
+                return $this->cleanText($date);
+            }
+        }
+
+        return null;
+    }
+
+    private function extractDeliveryPrice(Crawler $crawler): ?string
+    {
+        // Flipkart often includes delivery charges inside a nearby div or span
+        $price = null;
+
+        // Common selector for delivery charge text
+        $crawler->filter('div.hVvnXm, div._3XINqE, span._3XINqE')->each(function (Crawler $node) use (&$price) {
+            $text = strtolower($node->text());
+
+            // Match lines like "Free delivery" or "₹40 delivery charge"
+            if (strpos($text, 'free delivery') !== false) {
+                $price = 'Free';
+            } elseif (preg_match('/₹\s?\d+/', $text, $matches)) {
+                $price = trim($matches[0]);
+            }
+        });
+
+        return $price ? $this->cleanText($price) : null;
+    }
+
+    
+    private function extractHighlights(Crawler $crawler): ?string
+    {
+        $highlights = [];
+
+        // Flipkart highlights section — usually inside <div class="xFVion"><ul><li class="_7eSDEz">...</li></ul></div>
+        $crawler->filter('div.xFVion ul li._7eSDEz')->each(function (Crawler $node) use (&$highlights) {
+            $text = trim($node->text());
+            if (!empty($text)) {
+                $highlights[] = $text;
+            }
+        });
+
+        // If not found, fallback to other possible Flipkart selectors
+        if (empty($highlights)) {
+            $crawler->filter('div._2MYpT0 ul li')->each(function (Crawler $node) use (&$highlights) {
+                $text = trim($node->text());
+                if (!empty($text)) {
+                    $highlights[] = $text;
+                }
+            });
+        }
+
+        return !empty($highlights) ? implode('. ', $highlights) : null;
+    }
+
+    
+
 
     
 

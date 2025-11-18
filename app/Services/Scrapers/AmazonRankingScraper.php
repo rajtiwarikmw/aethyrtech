@@ -351,8 +351,10 @@ class AmazonRankingScraper
 
             $rankingData = [
                 'product_id' => $product ? $product->id : null,
+                'scraper_id' =>"2",
                 'sku' => $productData['sku'],
                 'keyword_id' => $keyword->id,
+                'platform' => "$this->platform",
                 'position' => $productData['position'],
                 'page' => $productData['page'],
             ];

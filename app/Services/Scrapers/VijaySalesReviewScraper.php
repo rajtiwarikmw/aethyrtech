@@ -117,6 +117,7 @@ class VijaySalesReviewScraper
                 try {
                     $reviewData = [
                         'product_id' => $productId,
+                        'platform' => 'vijaysales',
                         'review_id' => 'VS_' . substr(md5($reviewNode->text()), 0, 16),
                         'reviewer_name' => $this->extractReviewerName($reviewNode),
                         'rating' => $this->extractRating($reviewNode),

@@ -244,6 +244,7 @@ class AmazonReviewScraper
                         try {
                             $reviewData = [
                                 'product_id' => $productId,
+                                'platform' => 'amazon',
                                 'review_id' => $this->extractReviewId($reviewNode),
                                 'reviewer_name' => $this->extractReviewerName($reviewNode),
                                 'reviewer_profile_url' => $this->extractReviewerProfileUrl($reviewNode),
@@ -254,6 +255,7 @@ class AmazonReviewScraper
                                 'verified_purchase' => $this->extractVerifiedPurchase($reviewNode),
                                 'helpful_count' => $this->extractHelpfulCount($reviewNode),
                                 'review_images' => $this->extractReviewImages($reviewNode),
+                                'video_urls' => $this->extractVideoUrls($reviewNode),
                                 'variant_info' => $this->extractVariantInfo($reviewNode),
                             ];
 
@@ -447,9 +449,39 @@ class AmazonReviewScraper
     protected function extractVerifiedPurchase(Crawler $reviewNode): bool
     {
         try {
-            $element = $reviewNode->filter('span[data-hook="avp-badge"]');
-            return $element->count() > 0;
+            // Multiple selectors for verified purchase badge
+            $selectors = [
+                'span[data-hook="avp-badge"]',
+                'span[data-hook="avp-badge-linkless"]',
+                '.a-color-state.a-text-bold',
+                'span:contains("Verified Purchase")',
+            ];
+
+            foreach ($selectors as $selector) {
+                $element = $reviewNode->filter($selector);
+                if ($element->count() > 0) {
+                    // Check if text contains "Verified Purchase"
+                    $text = $element->first()->text();
+                    if (stripos($text, 'Verified Purchase') !== false) {
+                        Log::debug("Found verified purchase badge", ['selector' => $selector]);
+                        return true;
+                    }
+                }
+            }
+
+            // Also check in the format strip div (as per user's HTML example)
+            $formatStrip = $reviewNode->filter('.review-format-strip, [class*="review-data"]');
+            if ($formatStrip->count() > 0) {
+                $text = $formatStrip->first()->text();
+                if (stripos($text, 'Verified Purchase') !== false) {
+                    Log::debug("Found verified purchase in format strip");
+                    return true;
+                }
+            }
+
+            return false;
         } catch (\Exception $e) {
+            Log::error("Failed to extract verified purchase", ['error' => $e->getMessage()]);
             return false;
         }
     }
@@ -494,6 +526,50 @@ class AmazonReviewScraper
             return null;
         }
     }
+    
+    /**
+     * Extract video URLs from review
+     */
+    private function extractVideoUrls(Crawler $reviewNode): ?string
+    {
+        try {
+            $videoUrls = [];
+            
+            // Selectors for review videos
+            $selectors = [
+                '.review-video-container video source',
+                '[data-hook="review-video"] source',
+                '.review-video source',
+                'video source',
+            ];
+
+            foreach ($selectors as $selector) {
+                $reviewNode->filter($selector)->each(function (Crawler $video) use (&$videoUrls) {
+                    $src = $video->attr('src');
+                    if ($src) {
+                        $videoUrls[] = $src;
+                    }
+                });
+            }
+
+            // Also check for video links
+            $reviewNode->filter('a[href*="video"], a[href*=".mp4"]')->each(function (Crawler $link) use (&$videoUrls) {
+                $href = $link->attr('href');
+                if ($href) {
+                    $videoUrls[] = $href;
+                }
+            });
+
+            if (!empty($videoUrls)) {
+                return json_encode(array_unique($videoUrls));
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            Log::error("Failed to extract video URLs", ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
 
     /**
      * Extract variant info
@@ -501,15 +577,59 @@ class AmazonReviewScraper
     protected function extractVariantInfo(Crawler $reviewNode): ?string
     {
         try {
-            $element = $reviewNode->filter('a[data-hook="format-strip"]');
-            if ($element->count() > 0) {
-                return trim($element->first()->text());
-            }
-        } catch (\Exception $e) {
-            // Ignore
-        }
+            // Selectors for variant info
+            $selectors = [
+                'span[data-hook="format-strip"]',
+                'span[data-hook="format-strip-linkless"]',
+                '.review-format-strip span',
+                '.review-data.review-format-strip span',
+                '.a-row.a-spacing-mini.review-data span',
+            ];
 
-        return null;
+            foreach ($selectors as $selector) {
+                $element = $reviewNode->filter($selector)->first();
+                if ($element->count() > 0) {
+                    $text = trim($element->text());
+                    
+                    // Check if it looks like variant info (contains: Color, Size, etc.)
+                    if ($text && 
+                        strlen($text) > 3 && 
+                        strlen($text) < 255 &&
+                        preg_match('/(colou?r|size|style|pattern|model|variant):/i', $text)) {
+                        
+                        // Remove "Verified Purchase" if it's in the same text
+                        $text = preg_replace('/\s*\|\s*Verified Purchase/i', '', $text);
+                        $text = preg_replace('/Verified Purchase\s*\|\s*/i', '', $text);
+                        $text = trim($text);
+                        
+                        if ($text) {
+                            Log::debug("Extracted variant info", ['variant' => $text]);
+                            return $text;
+                        }
+                    }
+                }
+            }
+
+            // Alternative: look for the format strip div and extract first span
+            $formatStripDiv = $reviewNode->filter('.review-format-strip, [class*="review-data"]');
+            if ($formatStripDiv->count() > 0) {
+                $spans = $formatStripDiv->filter('span');
+                if ($spans->count() > 0) {
+                    // First span is usually the variant
+                    $text = trim($spans->first()->text());
+                    // Make sure it's not "Verified Purchase"
+                    if ($text && stripos($text, 'Verified Purchase') === false) {
+                        Log::debug("Extracted variant from format strip div", ['variant' => $text]);
+                        return $text;
+                    }
+                }
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            Log::error("Failed to extract variant info", ['error' => $e->getMessage()]);
+            return null;
+        }
     }
 
     /**

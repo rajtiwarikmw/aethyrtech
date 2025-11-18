@@ -13,7 +13,7 @@ class FlipkartRankingScraper
 {
     protected Client $httpClient;
     protected string $platform = 'flipkart';
-    protected int $maxPages = 2;
+    protected int $maxPages = 5;
     protected array $stats = [
         'keywords_processed' => 0,
         'products_found' => 0,
@@ -48,6 +48,16 @@ class FlipkartRankingScraper
         }
         $keywords = $query->get();
 
+        Log::info("Starting Flipkart ranking scraping", [
+            'total_keywords' => $keywords->count(),
+            'keyword_ids' => $keywordIds
+        ]);
+
+        if ($keywords->isEmpty()) {
+            Log::warning("No active keywords found for Flipkart");
+            return $this->stats;
+        }
+
         foreach ($keywords as $keyword) {
             try {
                 $this->scrapeKeywordRankings($keyword);
@@ -67,6 +77,11 @@ class FlipkartRankingScraper
 
     protected function scrapeKeywordRankings(Keyword $keyword): void
     {
+        Log::info("Scraping Flipkart rankings for keyword", [
+            'keyword' => $keyword->keyword,
+            'keyword_id' => $keyword->id
+        ]);
+
         $globalPosition = 0;
 
         for ($page = 1; $page <= $this->maxPages; $page++) {
@@ -115,12 +130,30 @@ class FlipkartRankingScraper
     protected function fetchPage(string $url): ?string
     {
         try {
+            Log::debug("Fetching Flipkart page", ['url' => $url]);
             $response = $this->httpClient->get($url);
-            if ($response->getStatusCode() === 200) {
+            $statusCode = $response->getStatusCode();
+            
+            Log::debug("Flipkart page response", [
+                'status_code' => $statusCode,
+                'content_length' => strlen($response->getBody()->getContents())
+            ]);
+            
+            if ($statusCode === 200) {
                 return $response->getBody()->getContents();
             }
+            
+            Log::warning("Flipkart returned non-200 status", [
+                'status_code' => $statusCode,
+                'url' => $url
+            ]);
+            
             return null;
         } catch (\Exception $e) {
+            Log::error("Failed to fetch Flipkart page", [
+                'url' => $url,
+                'error' => $e->getMessage()
+            ]);
             return null;
         }
     }
@@ -131,8 +164,41 @@ class FlipkartRankingScraper
         $positionOnPage = 0;
 
         try {
+            // Try multiple Flipkart product selectors
+            $selectors = [
+                'div[data-id]',
+                'div._1AtVbE',
+                'div._13oc-S',
+                'div._1YokD2',
+                'div[data-tkid]',
+                'a[href*="/p/"]',
+            ];
+
+            $foundProducts = false;
+            
+            foreach ($selectors as $selector) {
+                $nodes = $crawler->filter($selector);
+                
+                if ($nodes->count() > 0) {
+                    Log::debug("Found Flipkart products using selector", [
+                        'selector' => $selector,
+                        'count' => $nodes->count()
+                    ]);
+                    $foundProducts = true;
+                    break;
+                }
+            }
+
+            if (!$foundProducts) {
+                Log::warning("No Flipkart products found with any selector", [
+                    'tried_selectors' => $selectors,
+                    'page' => $page
+                ]);
+                return [];
+            }
+
             // Flipkart product selectors
-            $crawler->filter('div[data-id], div._1AtVbE')->each(function (Crawler $node) use (&$products, $page, &$positionOnPage, $startPosition) {
+            $crawler->filter('div[data-id], div._1AtVbE, div._13oc-S, div._1YokD2, div[data-tkid]')->each(function (Crawler $node) use (&$products, $page, &$positionOnPage, $startPosition) {
                 try {
                     $positionOnPage++;
                     $globalPosition = $startPosition + $positionOnPage;
@@ -162,6 +228,12 @@ class FlipkartRankingScraper
                         'page' => $page,
                     ];
 
+                    Log::debug("Found Flipkart product", [
+                        'sku' => $productId,
+                        'position' => $globalPosition,
+                        'page' => $page
+                    ]);
+
                     $this->stats['products_found']++;
                 } catch (\Exception $e) {
                     // Skip this product
@@ -185,6 +257,7 @@ class FlipkartRankingScraper
                 'product_id' => $product ? $product->id : null,
                 'sku' => $productData['sku'],
                 'keyword_id' => $keyword->id,
+                'platform' => $this->platform,
                 'position' => $productData['position'],
                 'page' => $productData['page'],
             ]);

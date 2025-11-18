@@ -26,3 +26,4 @@ Route::prefix('dashboard')->name('dashboard.')->group(function () {
 });
 
 require __DIR__.'/web_scraping_urls.php';
+require __DIR__.'/admin.php';

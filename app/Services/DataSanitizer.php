@@ -32,6 +32,7 @@ class DataSanitizer
         $sanitized['currency_code'] = self::sanitizeString($data['currency_code'] ?? null);
         $sanitized['seller_name'] = self::sanitizeText($data['seller_name'] ?? null);
         $sanitized['highlights'] = self::sanitizeText($data['highlights'] ?? null);
+        $sanitized['customers_say'] = self::sanitizeText($data['customers_say'] ?? null);
         $sanitized['delivery_price'] = self::sanitizeText($data['delivery_price'] ?? null);
         $sanitized['delivery_date'] = self::sanitizeText($data['delivery_date'] ?? null);
 
@@ -39,6 +40,12 @@ class DataSanitizer
         $sanitized['price'] = self::sanitizePrice($data['price'] ?? null);
         $sanitized['sale_price'] = self::sanitizePrice($data['sale_price'] ?? null);
         $sanitized['rating'] = self::sanitizeRating($data['rating'] ?? null);
+        $sanitized['rating_1_star_percent'] = self::sanitizeString($data['rating_1_star_percent'] ?? 0);
+        $sanitized['rating_2_star_percent'] = self::sanitizeString($data['rating_2_star_percent'] ?? 0);
+        $sanitized['rating_3_star_percent'] = self::sanitizeString($data['rating_3_star_percent'] ?? 0);
+        $sanitized['rating_4_star_percent'] = self::sanitizeString($data['rating_4_star_percent'] ?? 0);
+        $sanitized['rating_5_star_percent'] = self::sanitizeString($data['rating_5_star_percent'] ?? 0);
+    
         $sanitized['review_count'] = self::sanitizeInteger($data['review_count'] ?? 0);
 
         // Array fields

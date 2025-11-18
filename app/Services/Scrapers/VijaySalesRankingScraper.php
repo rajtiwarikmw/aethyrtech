@@ -182,6 +182,7 @@ class VijaySalesRankingScraper
                 'product_id' => $product ? $product->id : null,
                 'sku' => $productData['sku'],
                 'keyword_id' => $keyword->id,
+                'platform' => $this->platform,
                 'position' => $productData['position'],
                 'page' => $productData['page'],
             ]);

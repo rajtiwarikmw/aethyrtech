@@ -12,6 +12,8 @@ class ProductRanking extends Model
 
     protected $fillable = [
         'product_id',
+        'scraper_id',
+        'platform',
         'sku',
         'keyword_id',
         'position',

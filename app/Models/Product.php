@@ -54,7 +54,17 @@ class Product extends Model
         'fulfilled_by',
         'delivery_date',
         'delivery_price',
-        'bestseller'
+        'bestseller',
+        'customers_say',
+        'countdown',
+        'rating_1_star_percent',
+        'rating_2_star_percent',
+        'rating_3_star_percent',
+        'rating_4_star_percent',
+        'rating_5_star_percent',
+        'scraper_id',
+        'include_exclude'
+
     ];
 
     protected $casts = [

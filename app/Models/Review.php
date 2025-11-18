@@ -12,6 +12,7 @@ class Review extends Model
 
     protected $fillable = [
         'product_id',
+        'scraper_id',
         'review_id',
         'reviewer_name',
         'reviewer_profile_url',
@@ -22,6 +23,7 @@ class Review extends Model
         'verified_purchase',
         'helpful_count',
         'review_images',
+        'video_urls',
         'variant_info',
         'review_url',
     ];
