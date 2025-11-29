@@ -5,20 +5,21 @@ namespace App\Services\Scrapers;
 use App\Services\DataSanitizer;
 use Symfony\Component\DomCrawler\Crawler;
 use Illuminate\Support\Facades\Log;
+use Spatie\Browsershot\Browsershot;
 
 class BigBasketScraper extends BaseScraper
 {
     protected function setupPlatformConfig(): void
     {
         $this->platform = 'bigbasket';
-        $this->useJavaScript = false; // BigBasket may require JavaScript for dynamic content
+        $this->useJavaScript = true; // FIXED: BigBasket requires JavaScript
         $this->paginationConfig = [
             'type' => 'regular',
-            'max_pages' => 50, // Adjusted for BigBasket's pagination
+            'max_pages' => 50,
             'page_param' => 'page',
             'has_next_selector' => '.pagination .next:not(.disabled)',
             'max_consecutive_errors' => 50,
-            'delay_between_pages' => [2, 5], // Moderate delays to avoid rate limiting
+            'delay_between_pages' => [3, 6], // Increased delays to avoid blocking
             'retry_failed_pages' => true,
             'max_retries_per_page' => 3
         ];
@@ -30,6 +31,57 @@ class BigBasketScraper extends BaseScraper
     }
 
     /**
+     * Fetch page with JavaScript rendering and anti-bot headers
+     */
+    protected function fetchPageWithBrowsershot(string $url): ?string
+    {
+        try {
+            Log::debug("Fetching BigBasket page with JavaScript", ['url' => $url]);
+
+            $html = Browsershot::url($url)
+                ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+                ->setExtraHttpHeaders([
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language' => 'en-US,en;q=0.9',
+                    'Accept-Encoding' => 'gzip, deflate, br',
+                    'Connection' => 'keep-alive',
+                    'Upgrade-Insecure-Requests' => '1',
+                ])
+                ->waitUntilNetworkIdle()
+                ->timeout(60)
+                ->bodyHtml();
+
+            if (strlen($html) < 1000) {
+                Log::warning("BigBasket returned suspiciously small response", [
+                    'url' => $url,
+                    'length' => strlen($html)
+                ]);
+                return null;
+            }
+
+            // Check for access denied
+            if (strpos($html, 'Access Denied') !== false || strpos($html, 'permission to access') !== false) {
+                Log::error("BigBasket blocked the request", ['url' => $url]);
+                return null;
+            }
+
+            Log::debug("Successfully fetched BigBasket page", [
+                'url' => $url,
+                'length' => strlen($html)
+            ]);
+
+            return $html;
+
+        } catch (\Exception $e) {
+            Log::error("Failed to fetch BigBasket page with Browsershot", [
+                'url' => $url,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
      * Extract product URLs from BigBasket category/search page
      */
     protected function extractProductUrls(Crawler $crawler, string $categoryUrl): array
@@ -37,36 +89,51 @@ class BigBasketScraper extends BaseScraper
         $productUrls = [];
 
         try {
-            // BigBasket product link selectors
+            // BigBasket product link selectors (updated for 2024)
             $selectors = [
-                'h3 a[href*="/pd/',
+                'a[href*="/pd/"]',  // Primary product links
+                'a[qa="product"]',  // QA attribute
+                'div[data-testid="product-card"] a',  // Test ID
+                'h3 a[href*="/pd/"]',  // Legacy selector
             ];
 
             foreach ($selectors as $selector) {
-                $crawler->filter($selector)->each(function (Crawler $node) use (&$productUrls) {
-                    $href = $node->attr('href');
-                    if ($href) {
-                        // Convert relative URLs to absolute
-                        if (strpos($href, 'http') !== 0) {
-                            $href = 'https://www.bigbasket.com' . $href;
-                        }
+                $nodes = $crawler->filter($selector);
+                
+                if ($nodes->count() > 0) {
+                    Log::debug("Found BigBasket product links using selector", [
+                        'selector' => $selector,
+                        'count' => $nodes->count()
+                    ]);
 
-                        // Include only product pages (e.g., URLs containing '/pd/')
-                        if (strpos($href, '/pd/') !== false) {
-                            $productUrls[] = $href;
+                    $nodes->each(function (Crawler $node) use (&$productUrls) {
+                        $href = $node->attr('href');
+                        if ($href) {
+                            // Convert relative URLs to absolute
+                            if (strpos($href, 'http') !== 0) {
+                                $href = 'https://www.bigbasket.com' . $href;
+                            }
+
+                            // Include only product pages (e.g., URLs containing '/pd/')
+                            if (strpos($href, '/pd/') !== false) {
+                                $productUrls[] = $href;
+                            }
                         }
-                    }
-                });
+                    });
+
+                    break; // Stop after finding products with first working selector
+                }
             }
 
             // Remove duplicates and limit results
             $productUrls = array_unique($productUrls);
-            $productUrls = array_slice($productUrls, 0, 50); // Limit to 50 products per page
+            $productUrls = array_slice($productUrls, 0, 50);
 
-            Log::info("Extracted {count} product URLs from BigBasket category page", [
+            Log::info("Extracted BigBasket product URLs", [
                 'count' => count($productUrls),
                 'category_url' => $categoryUrl
             ]);
+
         } catch (\Exception $e) {
             Log::error("Failed to extract product URLs from BigBasket", [
                 'error' => $e->getMessage(),
@@ -93,27 +160,37 @@ class BigBasketScraper extends BaseScraper
             }
 
             $data["product_url"] = $productUrl;
-            $data["platform_id"] = $data["sku"]; // BigBasket uses SKU as unique identifier
+            $data["platform_id"] = $data["sku"];
 
-            // Product Attributes
-            $data["title"] = $this->extractProductName($crawler);
-            $data["description"] = $this->extractDescription($crawler);
-            $data["brand"] = $this->extractBrand($crawler);
-            $data["category"] = $this->extractCategory($crawler);
-            $data["image_urls"] = $this->extractImages($crawler);
+            // Try to extract from JSON-LD first (most reliable)
+            $jsonLdData = $this->extractFromJsonLd($crawler);
+            if ($jsonLdData) {
+                $data = array_merge($data, $jsonLdData);
+            }
+
+            // Product Attributes (with fallbacks)
+            $data["title"] = $data["title"] ?? $this->extractProductName($crawler);
+            $data["description"] = $data["description"] ?? $this->extractDescription($crawler);
+            $data["brand"] = $data["brand"] ?? $this->extractBrand($crawler);
+            $data["category"] = $data["category"] ?? $this->extractCategory($crawler);
+            $data["image_urls"] = $data["image_urls"] ?? $this->extractImages($crawler);
             $data["weight"] = $this->extractItemWeight($crawler);
             $data["dimensions"] = $this->extractProductDimensions($crawler);
 
             // Price Attributes
-            $priceData = $this->extractPrices($crawler);
-            $data["price"] = $priceData["price"];
-            $data["sale_price"] = $priceData["sale_price"];
+            if (!isset($data["price"]) || !isset($data["sale_price"])) {
+                $priceData = $this->extractPrices($crawler);
+                $data["price"] = $data["price"] ?? $priceData["price"];
+                $data["sale_price"] = $data["sale_price"] ?? $priceData["sale_price"];
+            }
             $data["currency_code"] = $this->extractCurrencyCode($crawler);
 
             // Ratings Attributes
-            $ratingData = $this->extractRatingAndReviews($crawler);
-            $data["rating"] = $ratingData["rating"];
-            $data["review_count"] = $ratingData["review_count"];
+            if (!isset($data["rating"]) || !isset($data["review_count"])) {
+                $ratingData = $this->extractRatingAndReviews($crawler);
+                $data["rating"] = $data["rating"] ?? $ratingData["rating"];
+                $data["review_count"] = $data["review_count"] ?? $ratingData["review_count"];
+            }
 
             // Additional Attributes
             $data["offers"] = $this->extractOffers($crawler);
@@ -130,6 +207,7 @@ class BigBasketScraper extends BaseScraper
             ]);
 
             return $data;
+
         } catch (\Exception $e) {
             Log::error("Failed to extract BigBasket product data", [
                 "url" => $productUrl,
@@ -141,11 +219,86 @@ class BigBasketScraper extends BaseScraper
     }
 
     /**
+     * Extract data from JSON-LD structured data
+     */
+    private function extractFromJsonLd(Crawler $crawler): ?array
+    {
+        try {
+            $jsonLdNodes = $crawler->filter('script[type="application/ld+json"]');
+            
+            if ($jsonLdNodes->count() === 0) {
+                return null;
+            }
+
+            foreach ($jsonLdNodes as $node) {
+                $json = $node->textContent;
+                $data = json_decode($json, true);
+
+                if ($data && isset($data['@type']) && $data['@type'] === 'Product') {
+                    $extracted = [];
+
+                    // Extract title
+                    if (isset($data['name'])) {
+                        $extracted['title'] = $data['name'];
+                    }
+
+                    // Extract description
+                    if (isset($data['description'])) {
+                        $extracted['description'] = $data['description'];
+                    }
+
+                    // Extract brand
+                    if (isset($data['brand']['name'])) {
+                        $extracted['brand'] = $data['brand']['name'];
+                    } elseif (isset($data['brand']) && is_string($data['brand'])) {
+                        $extracted['brand'] = $data['brand'];
+                    }
+
+                    // Extract images
+                    if (isset($data['image'])) {
+                        $extracted['image_urls'] = is_array($data['image']) ? $data['image'] : [$data['image']];
+                    }
+
+                    // Extract prices
+                    if (isset($data['offers'])) {
+                        $offers = $data['offers'];
+                        if (isset($offers['price'])) {
+                            $extracted['sale_price'] = (float) $offers['price'];
+                        }
+                        if (isset($offers['highPrice'])) {
+                            $extracted['price'] = (float) $offers['highPrice'];
+                        }
+                    }
+
+                    // Extract rating
+                    if (isset($data['aggregateRating'])) {
+                        $rating = $data['aggregateRating'];
+                        if (isset($rating['ratingValue'])) {
+                            $extracted['rating'] = (float) $rating['ratingValue'];
+                        }
+                        if (isset($rating['reviewCount'])) {
+                            $extracted['review_count'] = (int) $rating['reviewCount'];
+                        }
+                    }
+
+                    Log::debug("Extracted data from JSON-LD", ['fields' => array_keys($extracted)]);
+                    return $extracted;
+                }
+            }
+
+        } catch (\Exception $e) {
+            Log::warning("Failed to extract from JSON-LD", ['error' => $e->getMessage()]);
+        }
+
+        return null;
+    }
+
+    /**
      * Extract SKU from BigBasket URL
      */
     private function extractSkuFromUrl(string $url): ?string
     {
-        // BigBasket SKU pattern (e.g., /pd/40012345/)
+        // BigBasket SKU pattern: /pd/{product_id}/{product-slug}/
         if (preg_match('/\/pd\/(\d+)/', $url, $matches)) {
             return $matches[1];
         }
@@ -154,22 +307,27 @@ class BigBasketScraper extends BaseScraper
     }
 
     /**
-     * Extract product name
+     * Extract product name (updated selectors for 2024)
      */
     private function extractProductName(Crawler $crawler): ?string
     {
         $selectors = [
-            'h1.prod-name', // Primary product title
-            '.product-title h1',
-            '.prod-details h1'
+            'h1[data-testid="product-title"]',  // Test ID
+            'h1.prod-name',  // Legacy
+            'h1.product-title',
+            '.prod-details h1',
+            'div[qa="product-title"] h1',
+            'h1',  // Fallback to any h1
         ];
 
         foreach ($selectors as $selector) {
             $element = $crawler->filter($selector);
             if ($element->count() > 0) {
-                $text = $this->cleanText($element->text());
+                $text = $this->cleanText($element->first()->text());
                 $text = preg_replace('/\s+/', ' ', $text);
-                return trim($text);
+                if ($text && strlen($text) > 3) {
+                    return trim($text);
+                }
             }
         }
 
@@ -177,41 +335,52 @@ class BigBasketScraper extends BaseScraper
     }
 
     /**
-     * Extract product description
+     * Extract product description (updated for React components)
      */
     private function extractDescription(Crawler $crawler): ?string
     {
         $descriptions = [];
 
-        // Description sections
-        $crawler->filter('.description .desc-text')->each(function (Crawler $node) use (&$descriptions) {
-            $text = $this->cleanText($node->text());
-            if ($text && strlen($text) > 10) {
-                $descriptions[] = $text;
-            }
-        });
+        // Try multiple description selectors
+        $selectors = [
+            'div[data-testid="product-description"]',
+            '.description .desc-text',
+            '.prod-details p',
+            'div[qa="product-description"]',
+            '.product-description',
+        ];
 
-        // Fallback to product details
-        $productDesc = $crawler->filter('.prod-details p')->first();
-        if ($productDesc->count() > 0) {
-            $descriptions[] = $this->cleanText($productDesc->text());
+        foreach ($selectors as $selector) {
+            $crawler->filter($selector)->each(function (Crawler $node) use (&$descriptions) {
+                $text = $this->cleanText($node->text());
+                if ($text && strlen($text) > 10) {
+                    $descriptions[] = $text;
+                }
+            });
+
+            if (!empty($descriptions)) {
+                break;
+            }
         }
 
         return !empty($descriptions) ? implode('. ', $descriptions) : null;
     }
 
     /**
-     * Extract prices
+     * Extract prices (updated selectors)
      */
     private function extractPrices(Crawler $crawler): array
     {
         $prices = ["price" => null, "sale_price" => null];
 
-        // Sale price
+        // Sale price selectors (updated for 2024)
         $salePriceSelectors = [
-            '.price .discnt-price', // Discounted price
+            'span[data-testid="selling-price"]',
+            '.price .discnt-price',
             '.prod-price .price-amt',
-            '.final-price'
+            '.final-price',
+            'span[qa="selling-price"]',
+            'div.SellingPrice___StyledDiv-sc-1e0twzt-0',  // Styled component
         ];
 
         foreach ($salePriceSelectors as $selector) {
@@ -226,11 +395,13 @@ class BigBasketScraper extends BaseScraper
             }
         }
 
-        // Original price (MRP)
+        // Original price (MRP) selectors
         $mrpPriceSelectors = [
-            '.price .mrp-price', // MRP price
+            'span[data-testid="mrp-price"]',
+            '.price .mrp-price',
             '.original-price',
-            '.strikethrough-price'
+            '.strikethrough-price',
+            'span[qa="mrp-price"]',
         ];
 
         foreach ($mrpPriceSelectors as $selector) {
@@ -267,8 +438,6 @@ class BigBasketScraper extends BaseScraper
                 '$' => 'USD',
                 '£' => 'GBP',
                 '€' => 'EUR',
-                '¥' => 'JPY',
-                '₩' => 'KRW',
             ];
             return $currencyMap[$symbol] ?? $symbol;
         }
@@ -283,9 +452,18 @@ class BigBasketScraper extends BaseScraper
     {
         $offers = [];
 
-        $discount = $crawler->filter('.offer-text, .discount-label')->first();
-        if ($discount->count() > 0) {
-            $offers[] = $this->cleanText($discount->text());
+        $selectors = [
+            'div[data-testid="offer-text"]',
+            '.offer-text',
+            '.discount-label',
+            'span[qa="offer"]',
+        ];
+
+        foreach ($selectors as $selector) {
+            $discount = $crawler->filter($selector)->first();
+            if ($discount->count() > 0) {
+                $offers[] = $this->cleanText($discount->text());
+            }
         }
 
         return !empty($offers) ? implode('; ', $offers) : null;
@@ -297,9 +475,11 @@ class BigBasketScraper extends BaseScraper
     private function extractAvailability(Crawler $crawler): ?string
     {
         $availabilitySelectors = [
+            'div[data-testid="stock-status"]',
             '.stock-status',
             '.availability-text',
-            '.out-of-stock'
+            '.out-of-stock',
+            'button[qa="add-to-cart"]',  // If button exists, it's in stock
         ];
 
         foreach ($availabilitySelectors as $selector) {
@@ -307,6 +487,10 @@ class BigBasketScraper extends BaseScraper
             if ($element->count() > 0) {
                 $text = $this->cleanText($element->text());
                 if ($text) {
+                    // Check if it's the add button
+                    if (stripos($text, 'add') !== false) {
+                        return 'In Stock';
+                    }
                     return $text;
                 }
             }
@@ -322,11 +506,13 @@ class BigBasketScraper extends BaseScraper
     {
         $data = ['rating' => null, 'review_count' => 0];
 
-        // Rating
+        // Rating selectors (updated)
         $ratingSelectors = [
+            'span[data-testid="rating"]',
             '.rating .avg-rating',
             '.product-rating .stars',
-            '.rating-stars'
+            '.rating-stars',
+            'div[qa="rating"]',
         ];
 
         foreach ($ratingSelectors as $selector) {
@@ -340,11 +526,13 @@ class BigBasketScraper extends BaseScraper
             }
         }
 
-        // Review count
+        // Review count selectors
         $reviewSelectors = [
+            'span[data-testid="review-count"]',
             '.review-count',
             '.rating .reviews',
-            '.total-reviews'
+            '.total-reviews',
+            'div[qa="review-count"]',
         ];
 
         foreach ($reviewSelectors as $selector) {
@@ -367,9 +555,11 @@ class BigBasketScraper extends BaseScraper
     private function extractBrand(Crawler $crawler): ?string
     {
         $selectors = [
+            'span[data-testid="brand"]',
             '.brand-name',
             '.prod-details .brand',
-            '.product-brand'
+            '.product-brand',
+            'div[qa="brand"]',
         ];
 
         foreach ($selectors as $selector) {
@@ -388,16 +578,17 @@ class BigBasketScraper extends BaseScraper
     private function extractCategory(Crawler $crawler): ?string
     {
         $selectors = [
+            'nav[data-testid="breadcrumb"] a',
             '.breadcrumb a',
             '.category-path a',
-            '.prod-details .category'
+            '.prod-details .category',
         ];
 
         $categories = [];
         foreach ($selectors as $selector) {
             $crawler->filter($selector)->each(function (Crawler $node) use (&$categories) {
                 $text = $this->cleanText($node->text());
-                if ($text && !in_array($text, $categories)) {
+                if ($text && !in_array($text, $categories) && $text !== 'Home') {
                     $categories[] = $text;
                 }
             });
@@ -416,21 +607,29 @@ class BigBasketScraper extends BaseScraper
     {
         $images = [];
 
-        // Main product image
-        $crawler->filter('.product-img img, .main-image img')->each(function (Crawler $node) use (&$images) {
-            $src = $node->attr('src') ?: $node->attr('data-src');
-            if ($src && strpos($src, 'http') === 0) {
-                $images[] = $src;
-            }
-        });
+        // Image selectors (updated)
+        $selectors = [
+            'img[data-testid="product-image"]',
+            '.product-img img',
+            '.main-image img',
+            'div[qa="product-image"] img',
+        ];
 
-        // Gallery images
-        $crawler->filter('.gallery-thumbs img, .additional-images img')->each(function (Crawler $node) use (&$images) {
-            $src = $node->attr('src') ?: $node->attr('data-src');
-            if ($src && strpos($src, 'http') === 0) {
-                $images[] = $src;
-            }
-        });
+        foreach ($selectors as $selector) {
+            $crawler->filter($selector)->each(function (Crawler $node) use (&$images) {
+                $src = $node->attr('src') ?: $node->attr('data-src') ?: $node->attr('srcset');
+                if ($src) {
+                    // Handle srcset
+                    if (strpos($src, ',') !== false) {
+                        $srcParts = explode(',', $src);
+                        $src = trim(explode(' ', trim($srcParts[0]))[0]);
+                    }
+                    if (strpos($src, 'http') === 0) {
+                        $images[] = $src;
+                    }
+                }
+            });
+        }
 
         return !empty($images) ? array_values(array_unique($images)) : null;
     }
@@ -441,9 +640,10 @@ class BigBasketScraper extends BaseScraper
     private function extractItemWeight(Crawler $crawler): ?string
     {
         $selectors = [
+            'span[data-testid="weight"]',
             '.prod-details .weight',
             '.product-specs .weight',
-            '.spec-table tr:contains("Weight") td:nth-child(2)'
+            '.spec-table tr:contains("Weight") td:nth-child(2)',
         ];
 
         foreach ($selectors as $selector) {
@@ -462,9 +662,10 @@ class BigBasketScraper extends BaseScraper
     private function extractProductDimensions(Crawler $crawler): ?string
     {
         $selectors = [
+            'span[data-testid="dimensions"]',
             '.prod-details .dimensions',
             '.product-specs .dimensions',
-            '.spec-table tr:contains("Dimensions") td:nth-child(2)'
+            '.spec-table tr:contains("Dimensions") td:nth-child(2)',
         ];
 
         foreach ($selectors as $selector) {
@@ -502,10 +703,10 @@ class BigBasketScraper extends BaseScraper
     {
         $attributes = [];
 
-        $crawler->filter('.variant-selector .variant-option')->each(function (Crawler $node) use (&$attributes) {
-            $name = $node->filter('.variant-name')->count() > 0 ? $this->cleanText($node->filter('.variant-name')->text()) : null;
+        $crawler->filter('.variant-selector .variant-option, div[data-testid="variant"] button')->each(function (Crawler $node) use (&$attributes) {
+            $name = $node->filter('.variant-name')->count() > 0 ? $this->cleanText($node->filter('.variant-name')->text()) : $this->cleanText($node->text());
             $image = $node->filter('img')->count() > 0 ? ($node->filter('img')->attr('src') ?: $node->filter('img')->attr('data-src')) : null;
-            $sku = $node->attr('data-sku') ?: null;
+            $sku = $node->attr('data-sku') ?: $node->attr('data-product-id') ?: null;
 
             if ($name) {
                 $attributes[] = [

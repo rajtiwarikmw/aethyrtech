@@ -146,7 +146,7 @@ class FlipkartReviewScraper
                 try {
                     $reviewData = [
                         'product_id' => $productId,
-                        'platform' => 'flipkart',
+                        'platform' => "flipkart",
                         'review_id' => $this->extractReviewId($reviewNode),
                         'reviewer_name' => $this->extractReviewerName($reviewNode),
                         'rating' => $this->extractRating($reviewNode),

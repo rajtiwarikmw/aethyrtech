@@ -69,7 +69,8 @@ class AmazonReviewScraper
             $query->limit($limit);
         }
 
-        $products = $query->get();
+        $productss = $query->get();
+        $products = $productss->unique('sku')->values();
 
         Log::info("Found {$products->count()} products to scrape reviews for");
 

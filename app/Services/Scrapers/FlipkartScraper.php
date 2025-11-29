@@ -141,7 +141,10 @@ class FlipkartScraper extends BaseScraper
             $selectors = [
                 'a[href*="/p/"]',
                 'a.VJA3rP', 
-                'a.wjcEIp'
+                'a.wjcEIp',
+                'a.GnxRXv',
+                'a.pIpigb',
+                'a.fb4uj3'
 
             ];
 
@@ -214,6 +217,7 @@ class FlipkartScraper extends BaseScraper
             $data["seller_name"] = $this->extractSellerName($crawler);
             $data["delivery_price"] = $this->extractDeliveryPrice($crawler);
             $data["delivery_date"] = $this->extractDeliveryDate($crawler);
+            $data["technical_details"] = $this->extractTechnicalDetails($crawler);
 
             // Prices
             $priceData = $this->extractPrices($crawler);
@@ -284,29 +288,48 @@ class FlipkartScraper extends BaseScraper
     private function extractProductName(Crawler $crawler): ?string
     {
         $selectors = [
-            '.B_NuCI',                    // Main title class
-            '._35KyD6',                   // Alternative title class
-            '.x2Jnpn',                    // Another variant
-            '.yhZ1nd',                    // Yet another class
-            'h1.yhZ1nd',                  // H1 with class
-            'h1 span.B_NuCI',             // H1 span combination
-            'span.B_NuCI',                // Direct span
-            'h1 span',                    // Generic h1 span
-            'h1',                         // Just h1
-            '[data-reactid] h1',          // React-based h1
-            '.title',                     // Generic title class
-            '[class*="title"]',          // Any class containing "title"
+            // Exact match for your HTML
+            'h1._6EBuvT span',
+            '.VU-ZEz',
+            'h1._6EBuvT',
+
+            // Flipkart common selectors
+            '.B_NuCI',
+            '._35KyD6',
+            '.x2Jnpn',
+            '.yhZ1nd',
+            'h1.yhZ1nd',
+            'span.B_NuCI',
+
+            // Generic
+            'h1 span',
+            'h1',
+            '[class*="title"]',
         ];
 
         foreach ($selectors as $selector) {
             $element = $crawler->filter($selector)->first();
+
             if ($element->count() > 0) {
-                return $this->cleanText($element->text());
+
+                // Try raw text
+                $text = trim($element->text());
+
+                // If text empty, try inner HTML without tags
+                if (!$text) {
+                    $text = trim(strip_tags($element->html()));
+                }
+
+                // Ensure final text is valid
+                if ($text && strlen($text) > 3) {
+                    return $this->cleanText($text);
+                }
             }
         }
 
         return null;
     }
+
 
     /**
      * Extract product description
@@ -344,7 +367,8 @@ class FlipkartScraper extends BaseScraper
 
         // Current price (sale price)
         $salePriceSelectors = [
-            ".Nx9bqj.CxhGGd"
+            ".Nx9bqj.CxhGGd",
+            ".hZ3P6w .bnqy13"
         ];
 
         foreach ($salePriceSelectors as $selector) {
@@ -361,7 +385,8 @@ class FlipkartScraper extends BaseScraper
 
         // Original price (MRP or regular price)
         $mrpPriceSelectors = [
-            ".hl05eU .yRaY8j"
+            ".hl05eU .yRaY8j",
+            ".kRYCnD .yHYOcc"
         ];
             
         foreach ($mrpPriceSelectors as $selector) {
@@ -432,7 +457,7 @@ class FlipkartScraper extends BaseScraper
         $offers = [];
 
         // Discount percentage
-        $discount = $crawler->filter('.hl05eU .UkUFwK.WW8yVX')->first();
+        $discount = $crawler->filter('.hl05eU .UkUFwK.WW8yVX .HQe8jr .rASMtN')->first();
         if ($discount->count() > 0) {
             $offers[] = $this->cleanText($discount->text());
         }
@@ -865,6 +890,40 @@ class FlipkartScraper extends BaseScraper
 
         return !empty($highlights) ? implode('. ', $highlights) : null;
     }
+
+    private function extractTechnicalDetails(Crawler $crawler): ?array
+    {
+        $details = [];
+
+        // Flipkart specifications structure
+        $selector = 'table._0ZhAN9 tr';
+
+        if ($crawler->filter($selector)->count()) {
+            $crawler->filter($selector)->each(function (Crawler $node) use (&$details) {
+
+                $key = $node->filter('td')->eq(0)->text('');
+                $valueNode = $node->filter('td')->eq(1);
+
+                // Value may be inside <li>
+                if ($valueNode->filter('li')->count() > 0) {
+                    $value = trim($valueNode->filter('li')->first()->text(''));
+                } else {
+                    $value = trim($valueNode->text(''));
+                }
+
+                // Clean and store
+                $key   = trim(preg_replace('/\s+/', ' ', $key));
+                $value = trim(preg_replace('/\s+/', ' ', $value));
+
+                if ($key && $value) {
+                    $details[$key] = $value;
+                }
+            });
+        }
+
+        return !empty($details) ? $details : null;
+    }
+
 
     
 

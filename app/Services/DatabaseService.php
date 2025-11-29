@@ -97,7 +97,8 @@ class DatabaseService
                 $data[$field] = substr($data[$field], 0, $maxLength);
                 Log::warning("Truncated field '{$field}' to {$maxLength} characters", [
                     'sku' => $data['sku'],
-                    'platform' => $data['platform']
+                    'platform' => $data['platform'],
+                    'title' => $data['title']
                 ]);
             }
         }

@@ -12,7 +12,9 @@ class Review extends Model
 
     protected $fillable = [
         'product_id',
+        'sku',
         'scraper_id',
+        'platform',
         'review_id',
         'reviewer_name',
         'reviewer_profile_url',
@@ -66,6 +68,7 @@ class Review extends Model
             'review_text',
             'helpful_count',
             'review_images',
+            'video_urls',
         ];
 
         foreach ($fieldsToCheck as $field) {

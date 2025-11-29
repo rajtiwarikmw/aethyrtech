@@ -38,7 +38,7 @@ return [
             'name' => 'Flipkart',
             'base_url' => 'https://www.flipkart.com',
             'category_urls' => [
-                'https://www.flipkart.com/computers/computer-peripherals/printers-inks/pr?sid=6bo,tia,ffn&otracker=categorytree',
+                'https://www.flipkart.com/computers/computer-peripherals/printers-inks/printers/pr?sid=6bo,tia,ffn,t64&q=printer&otracker=categorytree',
             ]
         ],
         'vijaysales' => [

@@ -1,0 +1,554 @@
+<?php
+
+namespace App\Services\Scrapers;
+
+use App\Models\Product;
+use App\Models\Review;
+use Illuminate\Support\Facades\Log;
+use Symfony\Component\DomCrawler\Crawler;
+use Spatie\Browsershot\Browsershot;
+
+class BigBasketReviewScraper
+{
+    protected $stats = [
+        'products_processed' => 0,
+        'reviews_found' => 0,
+        'reviews_saved' => 0,
+        'errors' => 0,
+    ];
+
+    /**
+     * Scrape reviews for all BigBasket products
+     */
+    public function scrapeAllReviews(?int $limit = null): array
+    {
+        Log::info("Starting BigBasket review scraping", ['limit' => $limit]);
+
+        $query = Product::where('platform', 'bigbasket')
+            ->whereNotNull('product_url')
+            ->whereNotNull('sku');
+
+        if ($limit) {
+            $query->limit($limit);
+        }
+
+        $products = $query->get();
+
+        Log::info("Found BigBasket products to scrape reviews", ['count' => $products->count()]);
+
+        foreach ($products as $product) {
+            $this->scrapeProductReviews($product);
+            
+            // Add delay between products to avoid rate limiting
+            sleep(rand(3, 6));
+        }
+
+        return $this->stats;
+    }
+
+    /**
+     * Scrape reviews for a single product
+     */
+    public function scrapeProductReviews(Product $product): void
+    {
+        try {
+            Log::info("Scraping BigBasket reviews for product", [
+                'product_id' => $product->id,
+                'sku' => $product->sku,
+                'title' => $product->title
+            ]);
+
+            $this->stats['products_processed']++;
+
+            // Get review URL
+            $reviewsUrl = $this->getReviewsUrl($product->product_url, $product->sku);
+            
+            if (!$reviewsUrl) {
+                Log::warning("Could not generate BigBasket review URL", [
+                    'product_id' => $product->id,
+                    'product_url' => $product->product_url
+                ]);
+                return;
+            }
+
+            Log::debug("Generated BigBasket review URL", ['review_url' => $reviewsUrl]);
+
+            // Fetch reviews page with JavaScript rendering
+            $html = $this->fetchPageWithBrowsershot($reviewsUrl);
+
+            if (!$html) {
+                Log::warning("Failed to fetch BigBasket reviews page", [
+                    'product_id' => $product->id,
+                    'review_url' => $reviewsUrl
+                ]);
+                $this->stats['errors']++;
+                return;
+            }
+
+            // Parse HTML
+            $crawler = new Crawler($html);
+
+            // Extract reviews
+            $reviews = $this->extractReviews($crawler, $product->id, $product->sku);
+
+            if (empty($reviews)) {
+                Log::info("No BigBasket reviews found for product", [
+                    'product_id' => $product->id,
+                    'sku' => $product->sku
+                ]);
+                return;
+            }
+
+            // Save reviews
+            foreach ($reviews as $reviewData) {
+                $this->saveReview($reviewData);
+            }
+
+            Log::info("Scraped BigBasket reviews for product", [
+                'product_id' => $product->id,
+                'reviews_count' => count($reviews)
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Failed to scrape BigBasket reviews for product", [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            $this->stats['errors']++;
+        }
+    }
+
+    /**
+     * Get reviews URL for BigBasket product
+     * BigBasket reviews are typically on the product page itself or in a reviews tab
+     */
+    protected function getReviewsUrl(string $productUrl, string $sku): ?string
+    {
+        // BigBasket shows reviews on the product page itself
+        // We may need to scroll to reviews section or click reviews tab
+        // For now, return the product URL as reviews are embedded
+        return $productUrl;
+    }
+
+    /**
+     * Fetch page with JavaScript rendering
+     */
+    protected function fetchPageWithBrowsershot(string $url): ?string
+    {
+        try {
+            Log::debug("Fetching BigBasket reviews page with JavaScript", ['url' => $url]);
+
+            $html = Browsershot::url($url)
+                ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+                ->setExtraHttpHeaders([
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language' => 'en-US,en;q=0.9',
+                    'Accept-Encoding' => 'gzip, deflate, br',
+                    'Connection' => 'keep-alive',
+                ])
+                ->waitUntilNetworkIdle()
+                ->timeout(60)
+                ->bodyHtml();
+
+            if (strlen($html) < 1000) {
+                Log::warning("BigBasket returned suspiciously small response", [
+                    'url' => $url,
+                    'length' => strlen($html)
+                ]);
+                return null;
+            }
+
+            // Check for access denied
+            if (strpos($html, 'Access Denied') !== false) {
+                Log::error("BigBasket blocked the request", ['url' => $url]);
+                
+                // Save HTML for debugging
+                $debugFile = storage_path('logs/bigbasket_reviews_debug_' . time() . '.html');
+                file_put_contents($debugFile, $html);
+                Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
+                
+                return null;
+            }
+
+            return $html;
+
+        } catch (\Exception $e) {
+            Log::error("Failed to fetch BigBasket reviews page", [
+                'url' => $url,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Extract reviews from page
+     */
+    protected function extractReviews(Crawler $crawler, int $productId, string $sku): array
+    {
+        $reviews = [];
+
+        try {
+            // BigBasket review container selectors (multiple fallbacks)
+            $containerSelectors = [
+                'div[data-testid="review-item"]',
+                'div.review-item',
+                'div.review-card',
+                'div[qa="review"]',
+                '.product-reviews .review',
+                'div[class*="Review"]',  // Styled components
+            ];
+
+            $reviewNodes = null;
+            $usedSelector = null;
+
+            // Try each selector
+            foreach ($containerSelectors as $selector) {
+                $nodes = $crawler->filter($selector);
+                if ($nodes->count() > 0) {
+                    $reviewNodes = $nodes;
+                    $usedSelector = $selector;
+                    Log::debug("Found BigBasket reviews using selector", [
+                        'selector' => $selector,
+                        'count' => $nodes->count()
+                    ]);
+                    break;
+                }
+            }
+
+            if (!$reviewNodes || $reviewNodes->count() === 0) {
+                Log::warning("No BigBasket review containers found", [
+                    'tried_selectors' => $containerSelectors
+                ]);
+                
+                // Save HTML for debugging
+                $debugFile = storage_path('logs/bigbasket_reviews_debug_no_reviews_' . time() . '.html');
+                file_put_contents($debugFile, $crawler->html());
+                Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
+                
+                return [];
+            }
+
+            // Extract each review
+            $reviewNodes->each(function (Crawler $node) use (&$reviews, $productId, $sku) {
+                try {
+                    $reviewData = [
+                        'product_id' => $productId,
+                        'sku' => $sku,
+                        'platform' => 'bigbasket',
+                        'review_id' => $this->extractReviewId($node),
+                        'reviewer_name' => $this->extractReviewerName($node),
+                        'rating' => $this->extractRating($node),
+                        'review_title' => $this->extractReviewTitle($node),
+                        'review_text' => $this->extractReviewText($node),
+                        'review_date' => $this->extractReviewDate($node),
+                        'verified_purchase' => $this->extractVerifiedPurchase($node),
+                        'helpful_count' => $this->extractHelpfulCount($node),
+                        'images' => $this->extractReviewImages($node),
+                    ];
+
+                    // Calculate sentiment based on rating
+                    if ($reviewData['rating']) {
+                        if ($reviewData['rating'] >= 4) {
+                            $reviewData['sentiment'] = 'positive';
+                        } elseif ($reviewData['rating'] >= 3) {
+                            $reviewData['sentiment'] = 'neutral';
+                        } else {
+                            $reviewData['sentiment'] = 'negative';
+                        }
+                    }
+
+                    // Only add if we have minimum required data
+                    if ($reviewData['review_text'] || $reviewData['rating']) {
+                        $reviews[] = $reviewData;
+                        $this->stats['reviews_found']++;
+                    }
+
+                } catch (\Exception $e) {
+                    Log::warning("Failed to extract BigBasket review", [
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            });
+
+        } catch (\Exception $e) {
+            Log::error("Failed to extract BigBasket reviews", [
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        return $reviews;
+    }
+
+    /**
+     * Extract review ID
+     */
+    protected function extractReviewId(Crawler $node): ?string
+    {
+        // Try to get from data attribute
+        $id = $node->attr('data-review-id') ?: $node->attr('data-id') ?: $node->attr('id');
+        
+        if ($id) {
+            return 'BB_' . $id;
+        }
+
+        // Generate from content hash
+        $text = $node->text();
+        return 'BB_' . substr(md5($text), 0, 12);
+    }
+
+    /**
+     * Extract reviewer name
+     */
+    protected function extractReviewerName(Crawler $node): ?string
+    {
+        $selectors = [
+            'span[data-testid="reviewer-name"]',
+            '.reviewer-name',
+            '.review-author',
+            'div[qa="reviewer-name"]',
+            '.author-name',
+        ];
+
+        foreach ($selectors as $selector) {
+            $element = $node->filter($selector);
+            if ($element->count() > 0) {
+                return trim($element->first()->text());
+            }
+        }
+
+        return 'Anonymous';
+    }
+
+    /**
+     * Extract rating
+     */
+    protected function extractRating(Crawler $node): ?float
+    {
+        $selectors = [
+            'span[data-testid="rating"]',
+            '.rating-value',
+            '.star-rating',
+            'div[qa="rating"]',
+        ];
+
+        foreach ($selectors as $selector) {
+            $element = $node->filter($selector);
+            if ($element->count() > 0) {
+                $text = $element->first()->text();
+                
+                // Extract number from text like "4.5" or "4 out of 5"
+                if (preg_match('/(\d+\.?\d*)/', $text, $matches)) {
+                    return (float) $matches[1];
+                }
+
+                // Count filled stars
+                $stars = $node->filter('.star.filled, .star-filled, svg.filled');
+                if ($stars->count() > 0) {
+                    return (float) $stars->count();
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract review title
+     */
+    protected function extractReviewTitle(Crawler $node): ?string
+    {
+        $selectors = [
+            'h3[data-testid="review-title"]',
+            '.review-title',
+            '.review-heading',
+            'div[qa="review-title"]',
+            'h4',
+        ];
+
+        foreach ($selectors as $selector) {
+            $element = $node->filter($selector);
+            if ($element->count() > 0) {
+                return trim($element->first()->text());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract review text
+     */
+    protected function extractReviewText(Crawler $node): ?string
+    {
+        $selectors = [
+            'div[data-testid="review-text"]',
+            '.review-text',
+            '.review-content',
+            'div[qa="review-text"]',
+            '.review-body',
+            'p',
+        ];
+
+        foreach ($selectors as $selector) {
+            $element = $node->filter($selector);
+            if ($element->count() > 0) {
+                $text = trim($element->first()->text());
+                if (strlen($text) > 10) {  // Ensure it's actual review text
+                    return $text;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract review date
+     */
+    protected function extractReviewDate(Crawler $node): ?string
+    {
+        $selectors = [
+            'span[data-testid="review-date"]',
+            '.review-date',
+            '.review-time',
+            'div[qa="review-date"]',
+            'time',
+        ];
+
+        foreach ($selectors as $selector) {
+            $element = $node->filter($selector);
+            if ($element->count() > 0) {
+                $dateText = trim($element->first()->text());
+                
+                // Try to parse date
+                try {
+                    $date = new \DateTime($dateText);
+                    return $date->format('Y-m-d');
+                } catch (\Exception $e) {
+                    // Return as-is if can't parse
+                    return $dateText;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract verified purchase status
+     */
+    protected function extractVerifiedPurchase(Crawler $node): bool
+    {
+        $selectors = [
+            'span[data-testid="verified-badge"]',
+            '.verified-purchase',
+            '.verified-badge',
+            'div[qa="verified"]',
+        ];
+
+        foreach ($selectors as $selector) {
+            $element = $node->filter($selector);
+            if ($element->count() > 0) {
+                $text = strtolower($element->first()->text());
+                return strpos($text, 'verified') !== false;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Extract helpful count
+     */
+    protected function extractHelpfulCount(Crawler $node): int
+    {
+        $selectors = [
+            'span[data-testid="helpful-count"]',
+            '.helpful-count',
+            '.vote-count',
+            'div[qa="helpful-count"]',
+        ];
+
+        foreach ($selectors as $selector) {
+            $element = $node->filter($selector);
+            if ($element->count() > 0) {
+                $text = $element->first()->text();
+                if (preg_match('/(\d+)/', $text, $matches)) {
+                    return (int) $matches[1];
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Extract review images
+     */
+    protected function extractReviewImages(Crawler $node): ?array
+    {
+        $images = [];
+
+        $selectors = [
+            'img[data-testid="review-image"]',
+            '.review-image img',
+            '.review-photos img',
+            'div[qa="review-image"] img',
+        ];
+
+        foreach ($selectors as $selector) {
+            $node->filter($selector)->each(function (Crawler $img) use (&$images) {
+                $src = $img->attr('src') ?: $img->attr('data-src');
+                if ($src && strpos($src, 'http') === 0) {
+                    $images[] = $src;
+                }
+            });
+
+            if (!empty($images)) {
+                break;
+            }
+        }
+
+        return !empty($images) ? $images : null;
+    }
+
+    /**
+     * Save review to database
+     */
+    protected function saveReview(array $reviewData): void
+    {
+        try {
+            Review::updateOrCreate(
+                [
+                    'platform' => $reviewData['platform'],
+                    'review_id' => $reviewData['review_id'],
+                ],
+                $reviewData
+            );
+
+            $this->stats['reviews_saved']++;
+
+            Log::debug("Saved BigBasket review", [
+                'review_id' => $reviewData['review_id'],
+                'product_id' => $reviewData['product_id']
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Failed to save BigBasket review", [
+                'review_id' => $reviewData['review_id'] ?? 'unknown',
+                'error' => $e->getMessage()
+            ]);
+            $this->stats['errors']++;
+        }
+    }
+
+    /**
+     * Get scraping statistics
+     */
+    public function getStats(): array
+    {
+        return $this->stats;
+    }
+}
