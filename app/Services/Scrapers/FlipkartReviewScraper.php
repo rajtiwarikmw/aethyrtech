@@ -12,6 +12,7 @@ use Symfony\Component\DomCrawler\Crawler;
 class FlipkartReviewScraper
 {
     protected Client $httpClient;
+    protected ?string $currentProductSku = null;
     protected array $stats = [
         'products_processed' => 0,
         'reviews_found' => 0,
@@ -77,8 +78,11 @@ class FlipkartReviewScraper
 
     protected function scrapeProductReviews(Product $product): void
     {
-        // Flipkart reviews are often loaded via AJAX or on the same page
-        $reviewsUrl = $this->getReviewsUrl($product->product_url);
+        // Store product SKU for use in review data
+        $this->currentProductSku = $product->sku;
+        
+        // Flipkart reviews URL format: https://www.flipkart.com/product/product-reviews/{sku}
+        $reviewsUrl = $this->getReviewsUrl($product->sku);
 
         if (!$reviewsUrl) {
             return;
@@ -116,10 +120,16 @@ class FlipkartReviewScraper
         }
     }
 
-    protected function getReviewsUrl(string $productUrl): ?string
+    protected function getReviewsUrl(string $sku): ?string
     {
-        // Flipkart reviews are usually on the same page or with #reviews anchor
-        return $productUrl;
+        // Flipkart review page format: https://www.flipkart.com/product/product-reviews/{sku}
+        // Example: https://www.flipkart.com/product/product-reviews/itmd0ee2f16df471
+        if (!$sku) {
+            Log::warning("Cannot generate Flipkart review URL without SKU");
+            return null;
+        }
+        
+        return "https://www.flipkart.com/product/product-reviews/{$sku}";
     }
 
     protected function fetchPage(string $url): ?string
@@ -141,12 +151,13 @@ class FlipkartReviewScraper
         $reviews = [];
 
         try {
-            // Flipkart review selectors (these may need adjustment based on current HTML structure)
-            $crawler->filter('div._1AtVbE, div.col-12-12')->each(function (Crawler $reviewNode) use (&$reviews, $productId) {
+            // Updated selector for 2024 Flipkart structure: div.col.x_CUu6.QccLnz
+            $crawler->filter('div.col.x_CUu6.QccLnz, div._1AtVbE, div.col-12-12')->each(function (Crawler $reviewNode) use (&$reviews, $productId) {
                 try {
                     $reviewData = [
                         'product_id' => $productId,
                         'platform' => "flipkart",
+                        'sku' => $this->currentProductSku,
                         'review_id' => $this->extractReviewId($reviewNode),
                         'reviewer_name' => $this->extractReviewerName($reviewNode),
                         'rating' => $this->extractRating($reviewNode),
@@ -174,8 +185,25 @@ class FlipkartReviewScraper
 
     protected function extractReviewId(Crawler $reviewNode): ?string
     {
-        // Generate a unique ID from review content hash
+        // Extract actual review ID from the id attribute
+        // Example: id="review-69c871e6-a4cb-4611-b35f-9a6d8713aae0"
         try {
+            // Try to find element with id starting with "review-"
+            $html = $reviewNode->html();
+            if (preg_match('/id="review-([a-f0-9-]+)"/', $html, $matches)) {
+                return $matches[1]; // Return the UUID part
+            }
+            
+            // Fallback: Try to find from permalink
+            $permalink = $reviewNode->filter('a[href*="reviewId="]');
+            if ($permalink->count() > 0) {
+                $href = $permalink->attr('href');
+                if (preg_match('/reviewId=([a-f0-9-]+)/', $href, $matches)) {
+                    return $matches[1];
+                }
+            }
+            
+            // Last fallback: Generate from content hash
             $text = $reviewNode->text();
             return 'FK_' . substr(md5($text), 0, 16);
         } catch (\Exception $e) {
@@ -186,11 +214,15 @@ class FlipkartReviewScraper
     protected function extractReviewerName(Crawler $reviewNode): ?string
     {
         try {
-            $selectors = ['p._2sc7ZR._2V5EHH', 'p._2NsDsF'];
+            // 2024 selector: p.zJ1ZGa.ZDi3w2
+            $selectors = ['p.zJ1ZGa.ZDi3w2', 'p._2sc7ZR._2V5EHH', 'p._2NsDsF'];
             foreach ($selectors as $selector) {
                 $element = $reviewNode->filter($selector);
                 if ($element->count() > 0) {
-                    return trim($element->first()->text());
+                    $name = trim($element->first()->text());
+                    // Remove extra spaces
+                    $name = preg_replace('/\s+/', ' ', $name);
+                    return $name;
                 }
             }
         } catch (\Exception $e) {
@@ -202,11 +234,15 @@ class FlipkartReviewScraper
     protected function extractRating(Crawler $reviewNode): ?float
     {
         try {
-            $element = $reviewNode->filter('div._3LWZlK, div.hGSR34');
-            if ($element->count() > 0) {
-                $ratingText = $element->first()->text();
-                if (preg_match('/(\d+)/', $ratingText, $matches)) {
-                    return (float) $matches[1];
+            // 2024 selector: div.MKiFS6.ojKpP6 (contains rating number)
+            $selectors = ['div.MKiFS6.ojKpP6', 'div._3LWZlK', 'div.hGSR34'];
+            foreach ($selectors as $selector) {
+                $element = $reviewNode->filter($selector);
+                if ($element->count() > 0) {
+                    $ratingText = $element->first()->text();
+                    if (preg_match('/(\d+)/', $ratingText, $matches)) {
+                        return (float) $matches[1];
+                    }
                 }
             }
         } catch (\Exception $e) {
@@ -218,20 +254,8 @@ class FlipkartReviewScraper
     protected function extractReviewTitle(Crawler $reviewNode): ?string
     {
         try {
-            $element = $reviewNode->filter('p._2-N8zT');
-            if ($element->count() > 0) {
-                return trim($element->first()->text());
-            }
-        } catch (\Exception $e) {
-            // Ignore
-        }
-        return null;
-    }
-
-    protected function extractReviewText(Crawler $reviewNode): ?string
-    {
-        try {
-            $selectors = ['div.t-ZTKy', 'div._1AtVbE div div'];
+            // 2024 selector: p.qW2QI1
+            $selectors = ['p.qW2QI1', 'p._2-N8zT'];
             foreach ($selectors as $selector) {
                 $element = $reviewNode->filter($selector);
                 if ($element->count() > 0) {
@@ -244,15 +268,62 @@ class FlipkartReviewScraper
         return null;
     }
 
+    protected function extractReviewText(Crawler $reviewNode): ?string
+    {
+        try {
+            // 2024 selector: div.G4PxIA div (contains review text)
+            $selectors = ['div.G4PxIA div div', 'div.t-ZTKy', 'div._1AtVbE div div'];
+            foreach ($selectors as $selector) {
+                $element = $reviewNode->filter($selector);
+                if ($element->count() > 0) {
+                    $text = trim($element->first()->text());
+                    // Remove "READ MORE" text if present
+                    $text = str_replace('READ MORE', '', $text);
+                    $text = trim($text);
+                    return $text;
+                }
+            }
+        } catch (\Exception $e) {
+            // Ignore
+        }
+        return null;
+    }
+
     protected function extractReviewDate(Crawler $reviewNode): ?string
     {
         try {
-            $element = $reviewNode->filter('p._2sc7ZR');
-            if ($element->count() > 0) {
-                $dateText = $element->first()->text();
-                // Parse Flipkart date format
-                if (preg_match('/(\d+)\s+(\w+),?\s+(\d{4})/', $dateText, $matches)) {
-                    $date = \DateTime::createFromFormat('d F Y', "{$matches[1]} {$matches[2]} {$matches[3]}");
+            // 2024 selector: p.zJ1ZGa (last occurrence contains date like "11 months ago")
+            $elements = $reviewNode->filter('p.zJ1ZGa');
+            if ($elements->count() > 0) {
+                // Get the last p.zJ1ZGa which usually contains the date
+                $dateText = $elements->last()->text();
+                
+                // Handle relative dates like "11 months ago", "2 days ago"
+                if (preg_match('/(\d+)\s+(day|week|month|year)s?\s+ago/i', $dateText, $matches)) {
+                    $amount = (int)$matches[1];
+                    $unit = strtolower($matches[2]);
+                    
+                    $date = new \DateTime();
+                    switch ($unit) {
+                        case 'day':
+                            $date->modify("-{$amount} days");
+                            break;
+                        case 'week':
+                            $date->modify("-{$amount} weeks");
+                            break;
+                        case 'month':
+                            $date->modify("-{$amount} months");
+                            break;
+                        case 'year':
+                            $date->modify("-{$amount} years");
+                            break;
+                    }
+                    return $date->format('Y-m-d');
+                }
+                
+                // Handle absolute dates like "Jun, 2023"
+                if (preg_match('/(\w+),?\s+(\d{4})/', $dateText, $matches)) {
+                    $date = \DateTime::createFromFormat('M Y', "{$matches[1]} {$matches[2]}");
                     if ($date) {
                         return $date->format('Y-m-d');
                     }
@@ -267,21 +338,34 @@ class FlipkartReviewScraper
     protected function extractVerifiedPurchase(Crawler $reviewNode): bool
     {
         try {
-            $element = $reviewNode->filter('p._2mcZGG');
-            return $element->count() > 0 && strpos($element->text(), 'Certified Buyer') !== false;
+            // 2024 selector: p.Zhmv6U (contains "Certified Buyer")
+            $selectors = ['p.Zhmv6U', 'p._2mcZGG'];
+            foreach ($selectors as $selector) {
+                $element = $reviewNode->filter($selector);
+                if ($element->count() > 0) {
+                    $text = $element->text();
+                    return strpos($text, 'Certified Buyer') !== false;
+                }
+            }
         } catch (\Exception $e) {
             return false;
         }
+        return false;
     }
 
     protected function extractHelpfulCount(Crawler $reviewNode): int
     {
         try {
-            $element = $reviewNode->filter('span._3c3Px5');
-            if ($element->count() > 0) {
-                $text = $element->first()->text();
-                if (preg_match('/(\d+)/', $text, $matches)) {
-                    return (int) $matches[1];
+            // 2024 selector: span.Fp3hrV (contains helpful count like "109")
+            $selectors = ['span.Fp3hrV', 'span._3c3Px5'];
+            foreach ($selectors as $selector) {
+                $elements = $reviewNode->filter($selector);
+                if ($elements->count() > 0) {
+                    // Get the first one (thumbs up count)
+                    $text = $elements->first()->text();
+                    if (preg_match('/(\d+)/', $text, $matches)) {
+                        return (int) $matches[1];
+                    }
                 }
             }
         } catch (\Exception $e) {

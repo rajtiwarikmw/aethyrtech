@@ -14,7 +14,7 @@ class VijaySalesScraper extends BaseScraper
         $this->useJavaScript = false; // VijaySales works with regular HTTP requests
         $this->paginationConfig = [
             'type' => 'regular',
-            'max_pages' => 100,
+            'max_pages' => 3,
             'page_param' => 'p',
             'has_next_selector' => '.pages .next',
         ];
@@ -123,10 +123,20 @@ class VijaySalesScraper extends BaseScraper
             $data['product_url'] = $productUrl;
             $data['title'] = $this->extractProductName($crawler);
             $data['description'] = $this->extractDescription($crawler);
-            $data["brand"] = $this->extractBrand($crawler);
-            $data["model_name"] = $this->extractModelName($crawler);
+            
+            // ✅ NEW: Extract all missing fields
+            $data['brand'] = $this->extractBrand($crawler);
+            $data['manufacturer'] = $this->extractManufacturer($crawler);
+            $data['model_name'] = $this->extractModelName($crawler);
+            $data['color'] = $this->extractColour($crawler);
             $data['highlights'] = $this->extractHighlights($crawler);
-            $data["technical_details"] = $this->extractTechnicalDetails($crawler);            
+            $data['product_badge'] = $this->extractProductBadge($crawler);
+            $data['category'] = $this->extractCategory($crawler);
+            $data['technical_details'] = $this->extractTechnicalDetails($crawler);
+            $data['weight'] = $this->extractItemWeight($crawler);
+            $data['dimensions'] = $this->extractProductDimensions($crawler);
+            $data['delivery_date'] = $this->extractDeliveryDate($crawler);
+            $data['delivery_price'] = $this->extractDeliveryPrice($crawler);
 
             $priceData = $this->extractPrices($crawler);
             $data['price'] = $priceData['price'];
@@ -138,6 +148,7 @@ class VijaySalesScraper extends BaseScraper
             $ratingData = $this->extractRatingAndReviews($crawler);
             $data['rating'] = $ratingData['rating'];
             $data['review_count'] = $ratingData['review_count'];
+            $data['rating_count'] = $ratingData['rating_count'];
 
             $specs = $this->extractSpecifications($crawler);
             $data = array_merge($data, $specs);
@@ -164,16 +175,18 @@ class VijaySalesScraper extends BaseScraper
 
     private function extractSkuFromUrl(string $url): ?string
     {
-        if (preg_match('/\/([a-zA-Z0-9\-]+)\.html/', $url, $matches)) {
+        // Match /p/{sku}/
+        if (preg_match('#/p/(\d+)/#', $url, $matches)) {
             return $matches[1];
         }
+
         return null;
     }
 
     private function extractSkuFromPage(Crawler $crawler): ?string
     {
         $selectors = [
-            '[data-product-id]',
+            '[data-product-sku]',
             '.product-sku',
             '.sku-number',
             '.product-code'
@@ -212,7 +225,6 @@ class VijaySalesScraper extends BaseScraper
         return null;
     }
 
-
     private function extractDescription(Crawler $crawler): ?string
     {
         $descriptions = [];
@@ -229,87 +241,31 @@ class VijaySalesScraper extends BaseScraper
 
     private function extractPrices(Crawler $crawler): array
     {
-        $prices = ['price' => null, 'sale_price' => null];
-
-        // Sale price (current price shown on site) - try multiple selectors
-        $priceSelectors = [
-            '.product__price--offer-wrapper .product__price--price[data-final-price]',
-            '.product__price--price[data-final-price]',
-            '[data-final-price]',
-            '.product__price--price',
-            '.price-final',
-            '.final-price',
-            '.offer-price',
-            '.selling-price',
-            '[class*="price"][class*="offer"]',
-            '[class*="final"][class*="price"]',
+        $prices = [
+            'price' => null,
+            'sale_price' => null,
         ];
 
-        foreach ($priceSelectors as $selector) {
-            try {
-                $element = $crawler->filter($selector);
-                if ($element->count() > 0) {
-                    $text = $element->first()->text();
-                    $price = $this->extractPrice($text);
-                    if ($price && $price > 0) {
-                        $prices['sale_price'] = $price;
-                        Log::debug("Extracted VijaySales sale price using selector: {$selector}", ['price' => $price]);
-                        break;
-                    }
-                }
-            } catch (\Exception $e) {
-                continue;
-            }
+        // ✅ FINAL / SALE PRICE (VISIBLE only)
+        $saleNode = $crawler->filter(
+            '.product__price--deatils:not(.d-none) [data-final-price]'
+        );
+
+        if ($saleNode->count() > 0) {
+            $prices['sale_price'] = (float) $saleNode->first()->attr('data-final-price');
         }
 
-        // Original MRP price - try multiple selectors
-        $originalPriceSelectors = [
-            '.product__price--offer-wrapper .product__price--mrp span[data-mrp]',
-            '.product__price--mrp span[data-mrp]',
-            '[data-mrp]',
-            '.product__price--mrp',
-            '.price-mrp',
-            '.mrp-price',
-            '.original-price',
-            '[class*="mrp"]',
-            '[class*="original"][class*="price"]',
-        ];
+        // ✅ MRP PRICE (VISIBLE only)
+        $mrpNode = $crawler->filter(
+            '.product__price--deatils:not(.d-none) [data-mrp]'
+        );
 
-        foreach ($originalPriceSelectors as $selector) {
-            try {
-                $element = $crawler->filter($selector);
-                if ($element->count() > 0) {
-                    $text = $element->first()->text();
-                    $price = $this->extractPrice($text);
-                    if ($price && $price > 0) {
-                        $prices['price'] = $price;
-                        Log::debug("Extracted VijaySales MRP using selector: {$selector}", ['price' => $price]);
-                        break;
-                    }
-                }
-            } catch (\Exception $e) {
-                continue;
-            }
-        }
-
-        // If we only got sale_price, use it as price too
-        if (!$prices['price'] && $prices['sale_price']) {
-            $prices['price'] = $prices['sale_price'];
-        }
-
-        // If we only got price, use it as sale_price too
-        if (!$prices['sale_price'] && $prices['price']) {
-            $prices['sale_price'] = $prices['price'];
-        }
-
-        if (!$prices['price'] && !$prices['sale_price']) {
-            Log::warning("Failed to extract VijaySales prices with any selector");
+        if ($mrpNode->count() > 0) {
+            $prices['price'] = (float) $mrpNode->first()->attr('data-mrp');
         }
 
         return $prices;
     }
-
-
 
     private function extractOffers(Crawler $crawler): ?string
     {
@@ -329,15 +285,34 @@ class VijaySalesScraper extends BaseScraper
         return !empty($offers) ? implode('; ', $offers) : null;
     }
 
-
-
     private function extractAvailability(Crawler $crawler): ?string
     {
+        // Get all instock elements
+        $crawler->filter('.instock__text')->each(function (Crawler $node) use (&$availability) {
+
+            $classes = $node->attr('class') ?? '';
+
+            // Visible element (no d-none)
+            if (strpos($classes, 'd-none') === false) {
+                $availability = 'In Stock';
+            }
+        });
+
+        if (!empty($availability)) {
+            return $availability;
+        }
+
+        // If instock__text exists but all are hidden
+        if ($crawler->filter('.instock__text')->count() > 0) {
+            return 'Out of Stock';
+        }
+
+        // Fallback selectors (generic)
         $availabilitySelectors = [
             '.stock-status',
             '.availability',
             '.in-stock',
-            '.out-of-stock'
+            '.out-of-stock',
         ];
 
         foreach ($availabilitySelectors as $selector) {
@@ -347,12 +322,18 @@ class VijaySalesScraper extends BaseScraper
             }
         }
 
+        // Safe default
         return 'In Stock';
     }
 
+
     private function extractRatingAndReviews(Crawler $crawler): array
     {
-        $data = ['rating' => null, 'review_count' => 0];
+        $data = [
+            'rating' => null,
+            'rating_count' => 0,
+            'review_count' => 0
+        ];
 
         // Extract rating from data-rating-summary
         $ratingElement = $crawler->filter('.product__title--reviews-star')->first();
@@ -360,16 +341,25 @@ class VijaySalesScraper extends BaseScraper
             $data['rating'] = (float) $ratingElement->attr('data-rating-summary');
         }
 
-        // Extract review count from span text
+        // Extract rating count and review count from span text
+        // Format: "5.0 (4 Ratings & 4 Reviews)"
         $reviewElement = $crawler->filter('.product__title--stats span')->first();
         if ($reviewElement->count() > 0) {
-            $data['review_count'] = $this->extractReviewCount($reviewElement->text());
+            $text = $reviewElement->text();
+            
+            // Extract rating count
+            if (preg_match('/(\d+)\s+Ratings?/i', $text, $matches)) {
+                $data['rating_count'] = (int) $matches[1];
+            }
+            
+            // Extract review count
+            if (preg_match('/(\d+)\s+Reviews?/i', $text, $matches)) {
+                $data['review_count'] = (int) $matches[1];
+            }
         }
 
         return $data;
     }
-
-
 
     private function extractSpecifications(Crawler $crawler): array
     {
@@ -404,7 +394,6 @@ class VijaySalesScraper extends BaseScraper
         return !empty($images) ? array_unique($images) : null;
     }
 
-
     private function extractVariants(Crawler $crawler): ?array
     {
         $variants = [];
@@ -418,6 +407,10 @@ class VijaySalesScraper extends BaseScraper
 
         return !empty($variants) ? $variants : null;
     }
+
+    // ============================================
+    // ✅ NEW EXTRACTION METHODS
+    // ============================================
 
     private function extractBrand(Crawler $crawler): ?string
     {
@@ -435,6 +428,23 @@ class VijaySalesScraper extends BaseScraper
         return $brand;
     }
 
+    private function extractManufacturer(Crawler $crawler): ?string
+    {
+        $manufacturer = null;
+
+        $crawler->filter('.productspecification .panel-list-key')->each(function (Crawler $keyNode) use (&$manufacturer) {
+            $keyText = trim(strtoupper($keyNode->text()));
+            if ($keyText === 'MANUFACTURERS DETAILS' || $keyText === 'MANUFACTURER DETAILS') {
+                $valueNode = $keyNode->siblings()->filter('.panel-list-value')->first();
+                if ($valueNode->count() > 0) {
+                    $manufacturer = trim($valueNode->text());
+                }
+            }
+        });
+
+        return $manufacturer;
+    }
+
     private function extractModelName(Crawler $crawler): ?string
     {
         $modelName = null;
@@ -449,6 +459,69 @@ class VijaySalesScraper extends BaseScraper
         });
 
         return $modelName;
+    }
+
+    private function extractColour(Crawler $crawler): ?string
+    {
+        $colour = null;
+
+        // Check in specifications
+        $crawler->filter('.productspecification .panel-list-key')->each(function (Crawler $keyNode) use (&$colour) {
+            $keyText = trim(strtoupper($keyNode->text()));
+            if ($keyText === 'COLOR' || $keyText === 'COLOUR') {
+                $valueNode = $keyNode->siblings()->filter('.panel-list-value')->first();
+                if ($valueNode->count() > 0) {
+                    $colour = trim($valueNode->text());
+                }
+            }
+        });
+
+        return $colour;
+    }
+
+    private function extractHighlights(Crawler $crawler): ?string
+    {
+        $highlights = [];
+
+        // Vijay Sales key features structure
+        $crawler->filter('div.product__keyfeatures ul.product__keyfeatures--list > li')
+            ->each(function (Crawler $node) use (&$highlights) {
+                $text = trim(preg_replace('/\s+/', ' ', $node->text()));
+                if ($text !== '') {
+                    $highlights[] = $text;
+                }
+            });
+
+        return !empty($highlights) ? implode(' | ', array_unique($highlights)) : null;
+    }
+
+    private function extractProductBadge(Crawler $crawler): ?string
+    {
+        // Extract product badge/label
+        // Format: <p class="product__tags--label label-two" style="display: block;">New Arrival</p>
+        
+        $badge = null;
+        
+        $badgeElement = $crawler->filter('p.product__tags--label')->first();
+        if ($badgeElement->count() > 0) {
+            // Check if it's visible (not d-none and display is not none)
+            $style = $badgeElement->attr('style');
+            $classes = $badgeElement->attr('class');
+            
+            if (strpos($classes, 'd-none') === false && 
+                strpos($style, 'display: none') === false) {
+                $badge = trim($badgeElement->text());
+            }
+        }
+
+        return $badge;
+    }
+
+    private function extractCategory(Crawler $crawler): ?string
+    {
+        // Vijay Sales doesn't have visible breadcrumbs in the HTML provided
+        // This would need to be extracted from URL or page metadata
+        return null;
     }
 
     private function extractTechnicalDetails(Crawler $crawler): ?array
@@ -469,23 +542,120 @@ class VijaySalesScraper extends BaseScraper
 
         return !empty($details) ? $details : null;
     }
-    
-    private function extractHighlights(Crawler $crawler): ?string
-    {
-        $highlights = [];
 
-        // Loop through each <li> inside the key features list
-        $crawler->filter('.product__keyfeatures--list li')->each(function (Crawler $node) use (&$highlights) {
-            $text = trim($node->text());
-            if ($text) {
-                $highlights[] = $text;
+    private function extractItemWeight(Crawler $crawler): ?string
+    {
+        $weight = null;
+
+        // Loop through all accordion sections
+        $crawler->filter('.accordion-item')->each(function (Crawler $section) use (&$weight) {
+
+            if ($weight !== null) {
+                return;
             }
+
+            $section->filter('.panel-list-key')->each(function (Crawler $keyNode) use (&$weight) {
+
+                $key = strtoupper(trim(preg_replace('/\s+/', ' ', $keyNode->text())));
+
+                if (str_contains($key, 'WEIGHT')) {
+                    $valueNode = $keyNode->siblings('.panel-list-value')->first();
+                    if ($valueNode->count() > 0) {
+                        $weight = trim(preg_replace('/\s+/', ' ', $valueNode->text()));
+                    }
+                }
+            });
         });
 
-        return !empty($highlights) ? implode('. ', $highlights) : null;
+        return $weight;
+    }
+
+
+    private function extractProductDimensions(Crawler $crawler): ?string
+    {
+        $dimensions = null;
+
+        // Loop through accordion sections
+        $crawler->filter('.accordion-item')->each(function (Crawler $section) use (&$dimensions) {
+
+            if ($dimensions !== null) {
+                return;
+            }
+
+            $titleNode = $section->filter('.accordion-title');
+            if ($titleNode->count() === 0) {
+                return;
+            }
+
+            $title = strtoupper(trim($titleNode->text()));
+
+            // Only dimension sections
+            if (!str_contains($title, 'DIMENSION') && !str_contains($title, 'SIZE')) {
+                return;
+            }
+
+            // Extract dimension value
+            $section->filter('.panel-list-key')->each(function (Crawler $keyNode) use (&$dimensions) {
+
+                $key = strtoupper(trim(preg_replace('/\s+/', ' ', $keyNode->text())));
+
+                if (
+                    str_contains($key, 'DIMENSION') ||
+                    str_contains($key, 'SIZE') ||
+                    str_contains($key, 'W X')
+                ) {
+                    $valueNode = $keyNode->siblings('.panel-list-value')->first();
+                    if ($valueNode->count() > 0) {
+                        $dimensions = trim(preg_replace('/\s+/', ' ', $valueNode->text()));
+                    }
+                }
+            });
+        });
+
+        return $dimensions;
     }
 
 
 
+    private function extractDeliveryDate(Crawler $crawler): ?string
+    {
+        // Format: <p class="delivery__text">Free delivery by 16 December, 2025</p>
+        
+        $deliveryDate = null;
+        
+        $deliveryElement = $crawler->filter('p.delivery__text')->first();
+        if ($deliveryElement->count() > 0) {
+            $text = $deliveryElement->text();
+            
+            // Extract date pattern: "by 16 December, 2025"
+            if (preg_match('/by\s+(\d+\s+\w+,?\s+\d{4})/i', $text, $matches)) {
+                $deliveryDate = trim($matches[1]);
+            }
+        }
 
+        return $deliveryDate;
+    }
+
+    private function extractDeliveryPrice(Crawler $crawler): ?string
+    {
+        // Format: <p class="delivery__text">Free delivery by 16 December, 2025</p>
+        
+        $deliveryPrice = null;
+        
+        $deliveryElement = $crawler->filter('p.delivery__text')->first();
+        if ($deliveryElement->count() > 0) {
+            $text = strtolower($deliveryElement->text());
+            
+            // Check for "free delivery"
+            if (strpos($text, 'free delivery') !== false) {
+                $deliveryPrice = 'Free';
+            }
+            // Check for price pattern like "₹40 delivery"
+            elseif (preg_match('/₹\s?\d+/', $text, $matches)) {
+                $deliveryPrice = trim($matches[0]);
+            }
+        }
+
+        return $deliveryPrice;
+    }
 }

@@ -12,6 +12,7 @@ use Symfony\Component\DomCrawler\Crawler;
 class AmazonReviewScraper
 {
     protected Client $httpClient;
+    protected ?string $currentProductSku = null;
     protected array $stats = [
         'products_processed' => 0,
         'reviews_found' => 0,
@@ -106,6 +107,9 @@ class AmazonReviewScraper
             'sku' => $product->sku,
             'title' => $product->title
         ]);
+
+        // Store product SKU for use in review data
+        $this->currentProductSku = $product->sku;
 
         // Get the reviews URL from the product URL
         $reviewsUrl = $this->getReviewsUrl($product->product_url, $product->sku);
@@ -246,6 +250,7 @@ class AmazonReviewScraper
                             $reviewData = [
                                 'product_id' => $productId,
                                 'platform' => 'amazon',
+                                'sku' => $this->currentProductSku,
                                 'review_id' => $this->extractReviewId($reviewNode),
                                 'reviewer_name' => $this->extractReviewerName($reviewNode),
                                 'reviewer_profile_url' => $this->extractReviewerProfileUrl($reviewNode),

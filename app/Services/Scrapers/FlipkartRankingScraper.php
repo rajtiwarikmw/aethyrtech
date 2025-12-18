@@ -13,10 +13,11 @@ class FlipkartRankingScraper
 {
     protected Client $httpClient;
     protected string $platform = 'flipkart';
-    protected int $maxPages = 5;
+    protected int $maxPages = 2;
     protected array $stats = [
         'keywords_processed' => 0,
         'products_found' => 0,
+        'sponsored_skipped' => 0,
         'rankings_recorded' => 0,
         'errors_count' => 0,
     ];
@@ -82,7 +83,7 @@ class FlipkartRankingScraper
             'keyword_id' => $keyword->id
         ]);
 
-        $globalPosition = 0;
+        $organicPosition = 0; // Position counter for organic products only
 
         for ($page = 1; $page <= $this->maxPages; $page++) {
             try {
@@ -94,7 +95,7 @@ class FlipkartRankingScraper
                 }
 
                 $crawler = new Crawler($html);
-                $products = $this->extractProductsFromPage($crawler, $page, $globalPosition);
+                $products = $this->extractProductsFromPage($crawler, $page, $organicPosition);
 
                 if (empty($products)) {
                     break;
@@ -104,10 +105,9 @@ class FlipkartRankingScraper
                     $this->saveRanking($keyword, $productData);
                 }
 
-                $globalPosition += count($products);
                 $this->randomDelay(2, 4);
             } catch (\Exception $e) {
-                Log::error("Error scraping Flipkart search page", [
+                Log::error("Error scraping Flipkart rankings page", [
                     'keyword' => $keyword->keyword,
                     'page' => $page,
                     'error' => $e->getMessage()
@@ -117,7 +117,7 @@ class FlipkartRankingScraper
         }
     }
 
-    protected function buildSearchUrl(string $keyword, int $page): string
+    protected function buildSearchUrl(string $keyword, int $page = 1): string
     {
         $baseUrl = 'https://www.flipkart.com/search';
         $params = [
@@ -134,13 +134,17 @@ class FlipkartRankingScraper
             $response = $this->httpClient->get($url);
             $statusCode = $response->getStatusCode();
             
-            Log::debug("Flipkart page response", [
-                'status_code' => $statusCode,
-                'content_length' => strlen($response->getBody()->getContents())
-            ]);
-            
             if ($statusCode === 200) {
-                return $response->getBody()->getContents();
+                // Get body content once and reuse it
+                $html = $response->getBody()->getContents();
+                
+                Log::debug("Flipkart page response", [
+                    'status_code' => $statusCode,
+                    'content_length' => strlen($html),
+                    'has_products' => substr_count($html, '/p/itm') > 0
+                ]);
+                
+                return $html;
             }
             
             Log::warning("Flipkart returned non-200 status", [
@@ -158,92 +162,107 @@ class FlipkartRankingScraper
         }
     }
 
-    protected function extractProductsFromPage(Crawler $crawler, int $page, int $startPosition): array
+    protected function extractProductsFromPage(Crawler $crawler, int $page, int &$organicPosition): array
     {
         $products = [];
-        $positionOnPage = 0;
 
         try {
-            // Try multiple Flipkart product selectors
-            $selectors = [
-                'div[data-id]',
-                'div._1AtVbE',
-                'div._13oc-S',
-                'div._1YokD2',
-                'div[data-tkid]',
-                'a[href*="/p/"]',
-            ];
-
-            $foundProducts = false;
-            
-            foreach ($selectors as $selector) {
-                $nodes = $crawler->filter($selector);
-                
-                if ($nodes->count() > 0) {
-                    Log::debug("Found Flipkart products using selector", [
-                        'selector' => $selector,
-                        'count' => $nodes->count()
-                    ]);
-                    $foundProducts = true;
-                    break;
-                }
-            }
-
-            if (!$foundProducts) {
-                Log::warning("No Flipkart products found with any selector", [
-                    'tried_selectors' => $selectors,
-                    'page' => $page
-                ]);
-                return [];
-            }
-
-            // Flipkart product selectors
-            $crawler->filter('div[data-id], div._1AtVbE, div._13oc-S, div._1YokD2, div[data-tkid]')->each(function (Crawler $node) use (&$products, $page, &$positionOnPage, $startPosition) {
+            // Use div[data-id] as primary selector (contains PID)
+            $crawler->filter('div[data-id]')->each(function (Crawler $node) use (&$products, $page, &$organicPosition) {
                 try {
-                    $positionOnPage++;
-                    $globalPosition = $startPosition + $positionOnPage;
-
-                    // Extract product ID from data-id attribute or URL
-                    $productId = $node->attr('data-id');
+                    // Extract product link to get SKU
+                    $linkNode = $node->filter('a[href*="/p/"]');
+                    if ($linkNode->count() === 0) {
+                        return; // Skip if no product link
+                    }
                     
-                    if (!$productId) {
-                        // Try to extract from link
-                        $linkNode = $node->filter('a');
-                        if ($linkNode->count() > 0) {
-                            $href = $linkNode->attr('href');
-                            // Extract product ID from Flipkart URL pattern
-                            if (preg_match('/\/p\/([a-zA-Z0-9]+)/', $href, $matches)) {
-                                $productId = $matches[1];
-                            }
-                        }
+                    $href = $linkNode->attr('href');
+                    
+                    // Extract SKU from URL pattern: /p/itmXXXXXXXXXXXX
+                    // Example: /canon-pixma-megatank-ink-efficient-g2730-multi-function-color-ink-tank-printer-black-70-ml-40/p/itm93ff30817a43a
+                    $sku = null;
+                    if (preg_match('/\/p\/(itm[a-zA-Z0-9]+)/', $href, $matches)) {
+                        $sku = $matches[1];
                     }
-
-                    if (!$productId) {
-                        return;
+                    
+                    if (!$sku) {
+                        Log::debug("Could not extract SKU from URL", ['href' => $href]);
+                        return; // Skip if no SKU
                     }
-
+                    
+                    // Check if product is sponsored
+                    $isSponsored = $this->isSponsored($href, $node);
+                    
+                    if ($isSponsored) {
+                        Log::debug("Skipping sponsored product", ['sku' => $sku]);
+                        $this->stats['sponsored_skipped']++;
+                        return; // Skip sponsored products
+                    }
+                    
+                    // Increment organic position only for non-sponsored products
+                    $organicPosition++;
+                    
                     $products[] = [
-                        'sku' => $productId,
-                        'position' => $globalPosition,
+                        'sku' => $sku,
+                        'position' => $organicPosition,
                         'page' => $page,
+                        'is_sponsored' => false,
                     ];
 
-                    Log::debug("Found Flipkart product", [
-                        'sku' => $productId,
-                        'position' => $globalPosition,
+                    Log::debug("Found organic Flipkart product", [
+                        'sku' => $sku,
+                        'position' => $organicPosition,
                         'page' => $page
                     ]);
 
                     $this->stats['products_found']++;
                 } catch (\Exception $e) {
-                    // Skip this product
+                    Log::warning("Error extracting product", ['error' => $e->getMessage()]);
                 }
             });
         } catch (\Exception $e) {
-            Log::error("Failed to extract Flipkart products", ['error' => $e->getMessage()]);
+            Log::error("Error extracting products from page", ['error' => $e->getMessage()]);
         }
 
         return $products;
+    }
+
+    protected function isSponsored(string $href, Crawler $node): bool
+    {
+        try {
+            // PRIMARY METHOD: Check for sponsored badge div.IxWX8O
+            // This div contains the "Sponsored" SVG badge
+            if ($node->filter('div.IxWX8O')->count() > 0) {
+                Log::debug("Sponsored product detected (div.IxWX8O badge found)");
+                return true;
+            }
+            
+            // Fallback Method 1: Check URL parameters
+            // Organic products have: fm=organic
+            // Sponsored products have: fm=search or other values
+            if (strpos($href, 'fm=organic') !== false) {
+                return false; // Organic product
+            }
+            
+            // If fm parameter exists but is not organic, it's likely sponsored
+            if (preg_match('/[?&]fm=([^&]+)/', $href, $matches)) {
+                $fmValue = $matches[1];
+                if ($fmValue !== 'organic') {
+                    Log::debug("Sponsored product detected", ['fm' => $fmValue]);
+                    return true;
+                }
+            }
+            
+            // Fallback Method 2: Check for "Sponsored" text in SVG or HTML
+            $html = $node->html();
+            if (stripos($html, 'Sponsored') !== false) {
+                return true;
+            }
+            
+            return false; // Default to organic if no sponsored indicators found
+        } catch (\Exception $e) {
+            return false; // Default to organic on error
+        }
     }
 
     protected function saveRanking(Keyword $keyword, array $productData): void
@@ -253,18 +272,30 @@ class FlipkartRankingScraper
                 ->where('sku', $productData['sku'])
                 ->first();
 
-            ProductRanking::create([
+            // Save ranking
+            $rankingData = [
                 'product_id' => $product ? $product->id : null,
+                'scraper_id' =>"2",
                 'sku' => $productData['sku'],
                 'keyword_id' => $keyword->id,
-                'platform' => $this->platform,
+                'platform' => "$this->platform",
                 'position' => $productData['position'],
                 'page' => $productData['page'],
-            ]);
+            ];
+            ProductRanking::create($rankingData);
 
             $this->stats['rankings_recorded']++;
+
+            Log::debug("Saved Flipkart ranking", [
+                'keyword' => $keyword->keyword,
+                'sku' => $productData['sku'],
+                'position' => $productData['position']
+            ]);
         } catch (\Exception $e) {
-            Log::error("Failed to save Flipkart ranking", ['error' => $e->getMessage()]);
+            Log::error("Failed to save Flipkart ranking", [
+                'sku' => $productData['sku'],
+                'error' => $e->getMessage()
+            ]);
             $this->stats['errors_count']++;
         }
     }
