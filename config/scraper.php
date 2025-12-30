@@ -52,7 +52,10 @@ return [
             'name' => 'Reliance Digital',
             'base_url' => 'https://www.reliancedigital.in',
             'category_urls' => [
-                'https://www.reliancedigital.in/products?q=printer&page_no=1&page_size=12&page_type=number',
+                'https://www.reliancedigital.in/collection/hp-printers?internal_source=navigation&page_no=1&page_size=12&page_type=number',
+                'https://www.reliancedigital.in/collection/canon-printers?internal_source=navigation&page_no=1&page_size=12&page_type=number',
+                'https://www.reliancedigital.in/collection/brother-printers?internal_source=navigation&page_no=1&page_size=12&page_type=number',
+                'https://www.reliancedigital.in/collection/epson-printers?internal_source=navigation&page_no=1&page_size=12&page_type=number',
             ]
         ],
         'croma' => [
@@ -74,6 +77,13 @@ return [
             'base_url' => 'https://www.bigbasket.com',
             'category_urls' => [
                 'https://www.bigbasket.com/pc/electronics/phone-laptop-accessory/printers-ink/?nc=nb',
+            ]
+        ],
+        'meesho' => [
+            'name' => 'Meesho',
+            'base_url' => 'https://www.meesho.com',
+            'category_urls' => [
+                'https://www.meesho.com/search?q=printer&searchType=manual&searchIdentifier=text_search',
             ]
         ]
     ],

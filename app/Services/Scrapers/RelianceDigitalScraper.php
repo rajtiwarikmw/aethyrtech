@@ -11,16 +11,16 @@ class RelianceDigitalScraper extends BaseScraper
 {
     protected function setupPlatformConfig(): void
     {
-        $this->platform = 'reliance_digital';
-        $this->useJavaScript = true; // Reliance Digital requires JavaScript
+        $this->platform = 'reliancedigital';
+        $this->useJavaScript = true;
         $this->paginationConfig = [
             'type' => 'regular',
-            'max_pages' => 100,
+            'max_pages' => 5,
             'page_param' => 'page',
             'has_next_selector' => '.pagination .next:not(.disabled)',
-            'delay_between_pages' => [3, 6], // Increased delays
+            'delay_between_pages' => [1, 2], // OPTIMIZED: Reduced delays
             'retry_failed_pages' => true,
-            'max_retries_per_page' => 3
+            'max_retries_per_page' => 2 // OPTIMIZED: Reduced retries
         ];
     }
 
@@ -29,15 +29,17 @@ class RelianceDigitalScraper extends BaseScraper
         parent::__construct('reliancedigital');
     }
 
-    /**
-     * Fetch page with JavaScript rendering and enhanced headers
-     */
     protected function fetchPageWithBrowsershot(string $url): ?string
     {
         try {
             Log::debug("Fetching Reliance Digital page with JavaScript", ['url' => $url]);
 
-            $html = Browsershot::url($url)
+            // Determine if this is a product page or category page
+            $isProductPage = strpos($url, '/product/') !== false;
+            
+            $timeout = $isProductPage ? 45 : 30;
+            
+            $browsershot = Browsershot::url($url)
                 ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
                 ->setExtraHttpHeaders([
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -49,15 +51,22 @@ class RelianceDigitalScraper extends BaseScraper
                     'Sec-Fetch-Mode' => 'navigate',
                     'Sec-Fetch-Site' => 'none',
                 ])
-                ->waitUntilNetworkIdle()
-                ->timeout(60)
-                ->bodyHtml();
+                ->timeout($timeout);
+            
+            $browsershot->waitForFunction(
+                '() => document.readyState === "complete"',
+                ['polling' => 500, 'timeout' => $timeout * 1000]
+            );
+            
+            $html = $browsershot->bodyHtml();
 
             $contentLength = strlen($html);
 
             Log::debug("Reliance Digital page response", [
                 'status_code' => 200,
-                'content_length' => $contentLength
+                'content_length' => $contentLength,
+                'is_product_page' => $isProductPage,
+                'timeout_used' => $timeout
             ]);
 
             if ($contentLength < 1000) {
@@ -87,7 +96,8 @@ class RelianceDigitalScraper extends BaseScraper
         } catch (\Exception $e) {
             Log::error("Failed to fetch Reliance Digital page", [
                 'url' => $url,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'error_code' => $e->getCode()
             ]);
             return null;
         }
@@ -101,9 +111,8 @@ class RelianceDigitalScraper extends BaseScraper
         $productUrls = [];
 
         try {
-            // Reliance Digital product link selectors (updated for 2024)
             $selectors = [
-                'a[href*="/p/"]',  // Product links with /p/ pattern
+                'a[href*="/product/"]',     
                 '.sp__product a',
                 '.product-tile a',
                 '.product-item a',
@@ -130,8 +139,10 @@ class RelianceDigitalScraper extends BaseScraper
                                 $href = 'https://www.reliancedigital.in' . $href;
                             }
                             
-                            // Only include product pages (with /p/ pattern)
-                            if (strpos($href, '/p/') !== false) {
+                            // Include both /product/ and /p/ patterns
+                            if (strpos($href, '/product/') !== false || strpos($href, '/p/') !== false) {
+                                // Remove query parameters for consistency
+                                $href = strtok($href, '?');
                                 $productUrls[] = $href;
                             }
                         }
@@ -301,9 +312,17 @@ class RelianceDigitalScraper extends BaseScraper
         return null;
     }
 
+    /**
+     * Extract SKU from URL
+     */
     private function extractSkuFromUrl(string $url): ?string
     {
-        // Pattern: /product-name/p/494350841
+        // Pattern: /product/hp-neverstop-laser-mfp-2606dn-multi-function-laserjet-printer-l2t8ca
+        if (preg_match('/\/product\/([a-zA-Z0-9\-]+)(?:\?|$)/', $url, $matches)) {
+            return $matches[1];
+        }
+        
+        // Pattern: /product-name/p/494350841 (fallback)
         if (preg_match('/\/p\/(\d+)/', $url, $matches)) {
             return $matches[1];
         }
@@ -628,6 +647,7 @@ class RelianceDigitalScraper extends BaseScraper
         }
 
         // Extract from specs table
+        $model = null;
         $crawler->filter('.product-specs tr, .specifications tr')->each(function (Crawler $row) use (&$model) {
             $cells = $row->filter('td');
             if ($cells->count() >= 2) {

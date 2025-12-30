@@ -10,6 +10,7 @@ use App\Services\Scrapers\RelianceDigitalScraper;
 use App\Services\Scrapers\CromaScraper;
 use App\Services\Scrapers\BlinkitScraper;
 use App\Services\Scrapers\BigBasketScraper;
+use App\Services\Scrapers\MeeshoScraper;
 use App\Services\DatabaseService;
 use Illuminate\Support\Facades\Log;
 
@@ -19,7 +20,7 @@ class ScrapeCommand extends Command
      * The name and signature of the console command.
      */
     protected $signature = 'scraper:run 
-                            {platform? : Platform to scrape (amazon, flipkart, vijaysales, reliancedigital, croma, blinkit, bigbasket, all)}
+                            {platform? : Platform to scrape (amazon, flipkart, vijaysales, reliancedigital, croma, blinkit, bigbasket, meesho, all)}
                             {--force : Force scraping even if recently scraped}
                             {--limit=70 : Limit number of products per platform}
                             {--timeout=43200 : Maximum execution time in seconds}';
@@ -150,6 +151,7 @@ class ScrapeCommand extends Command
             'croma' => new CromaScraper(),
             'blinkit' => new BlinkitScraper(),
             'bigbasket' => new BigBasketScraper(),
+            'meesho' => new MeeshoScraper(),
             default => null
         };
     }

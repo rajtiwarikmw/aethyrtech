@@ -12,9 +12,9 @@ class BrowserService
     public function __construct()
     {
         $this->defaultOptions = [
-            'timeout' => 120, // Increased from 60 to 120 seconds
-            'waitUntilNetworkIdle' => true,
-            'userAgent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'timeout' => 60, // Increased from 60 to 120 seconds
+            'headless' => true,
+            'userAgent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'windowSize' => [1920, 1080],
             'args' => [
                 '--no-sandbox',
@@ -49,7 +49,9 @@ class BrowserService
                     ->userAgent($this->defaultOptions['userAgent'])
                     ->windowSize($this->defaultOptions['windowSize'][0], $this->defaultOptions['windowSize'][1])
                     ->delay($waitTime * 1000); // Convert to milliseconds
-
+                $browsershot->evaluate("
+                        localStorage.setItem('deliveryPincode', '110001');
+                    ");
                 // Add Chrome arguments
                 foreach ($this->defaultOptions['args'] as $arg) {
                     $browsershot->addChromiumArguments([$arg]);
@@ -57,7 +59,7 @@ class BrowserService
 
                 // Try with network idle first, then fallback to load event
                 if ($attempts === 0) {
-                    $browsershot->waitUntilNetworkIdle();
+                    $browsershot->waitUntil('domcontentloaded')->delay(10000);
                 } else {
                     // Fallback: just wait for load event - removed waitForFunction due to compatibility issues
                     $browsershot->setDelay(3000); // Wait 3 seconds instead
@@ -171,7 +173,7 @@ class BrowserService
                 ->timeout(120) // Longer timeout for infinite scroll
                 ->userAgent($this->defaultOptions['userAgent'])
                 ->windowSize($this->defaultOptions['windowSize'][0], $this->defaultOptions['windowSize'][1])
-                ->waitUntilNetworkIdle();
+                ->waitUntil('domcontentloaded');
 
             // Add Chrome arguments
             foreach ($this->defaultOptions['args'] as $arg) {
@@ -237,7 +239,7 @@ class BrowserService
                 ->timeout($this->defaultOptions['timeout'])
                 ->userAgent($this->defaultOptions['userAgent'])
                 ->windowSize($this->defaultOptions['windowSize'][0], $this->defaultOptions['windowSize'][1])
-                ->waitUntilNetworkIdle()
+                ->waitUntil('domcontentloaded')
                 ->delay($waitTime * 1000);
 
             // Add Chrome arguments
@@ -270,7 +272,9 @@ class BrowserService
                 ->timeout($this->defaultOptions['timeout'])
                 ->userAgent($this->defaultOptions['userAgent'])
                 ->windowSize($this->defaultOptions['windowSize'][0], $this->defaultOptions['windowSize'][1])
-                ->waitUntilNetworkIdle()
+                ->evaluate("localStorage.setItem('deliveryPincode', '110001');")
+                ->waitUntil('domcontentloaded')
+                ->delay(10000)
                 ->save($savePath);
 
             return file_exists($savePath);
