@@ -218,6 +218,7 @@ class RelianceDigitalScraper extends BaseScraper
 
             // Additional data
             $data['offers'] = $this->extractOffers($crawler);
+            $data["highlights"] = $this->extractHighlights($crawler);
             $data['inventory_status'] = $this->extractAvailability($crawler);
             $data['model_name'] = $this->extractModelName($crawler);
             $data['technical_details'] = $this->extractSpecifications($crawler);
@@ -432,46 +433,56 @@ class RelianceDigitalScraper extends BaseScraper
 
     private function extractPrices(Crawler $crawler): array
     {
-        $prices = ['price' => null, 'sale_price' => null];
-
-        // Sale price selectors
-        $priceSelectors = [
-            'span[data-testid="selling-price"]',
-            '.pdp__pricing .WebRupee',
-            '.price-current',
-            '.offer-price',
-            '.selling-price',
-            '.final-price',
+        $prices = [
+            'price' => null,       // MRP / Original price
+            'sale_price' => null,  // Selling price
         ];
 
-        foreach ($priceSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $price = $this->extractPrice($element->text());
-                if ($price) {
-                    $prices['sale_price'] = $price;
-                    break;
+        $salePriceSelectors = [
+            '.product-price', // Reliance Digital
+            'span[data-testid="selling-price"]',
+            '.selling-price',
+            '.offer-price',
+            '.final-price',
+            '.price-current',
+        ];
+
+        foreach ($salePriceSelectors as $selector) {
+            try {
+                $element = $crawler->filter($selector)->first();
+                if ($element->count() > 0) {
+                    $price = $this->extractPrice($element->text());
+                    if ($price > 0) {
+                        $prices['sale_price'] = $price;
+                        break;
+                    }
                 }
+            } catch (\Exception $e) {
+                continue;
             }
         }
 
-        // Original price selectors
-        $originalPriceSelectors = [
+        $mrpSelectors = [
+            '.product-marked-price', // Reliance Digital
             'span[data-testid="mrp-price"]',
-            '.price-was',
             '.mrp-price',
             '.original-price',
+            '.price-was',
             '.strikethrough-price',
         ];
 
-        foreach ($originalPriceSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $price = $this->extractPrice($element->text());
-                if ($price) {
-                    $prices['price'] = $price;
-                    break;
+        foreach ($mrpSelectors as $selector) {
+            try {
+                $element = $crawler->filter($selector)->first();
+                if ($element->count() > 0) {
+                    $price = $this->extractPrice($element->text());
+                    if ($price > 0) {
+                        $prices['price'] = $price;
+                        break;
+                    }
                 }
+            } catch (\Exception $e) {
+                continue;
             }
         }
 
@@ -479,8 +490,19 @@ class RelianceDigitalScraper extends BaseScraper
             $prices['price'] = $prices['sale_price'];
         }
 
+        if (
+            $prices['price'] &&
+            $prices['sale_price'] &&
+            $prices['sale_price'] > $prices['price']
+        ) {
+            $tmp = $prices['price'];
+            $prices['price'] = $prices['sale_price'];
+            $prices['sale_price'] = $tmp;
+        }
+
         return $prices;
     }
+
 
     private function extractOffers(Crawler $crawler): ?string
     {
@@ -490,7 +512,7 @@ class RelianceDigitalScraper extends BaseScraper
             '.offer-text',
             '.discount-info',
             '.promotion-text',
-            'div[data-testid="offers"]',
+            'product-price-discount',
         ];
 
         foreach ($selectors as $selector) {
@@ -628,38 +650,40 @@ class RelianceDigitalScraper extends BaseScraper
             }
         }
 
-        return !empty($categories) ? implode(' > ', $categories) : null;
+        return !empty($categories) ? implode(' ,', $categories) : null;
     }
 
     private function extractModelName(Crawler $crawler): ?string
     {
-        $selectors = [
-            'span[data-testid="model"]',
-            '.model-number',
-            '.model-name',
-        ];
-
-        foreach ($selectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                return $this->cleanText($element->text());
-            }
-        }
-
-        // Extract from specs table
         $model = null;
-        $crawler->filter('.product-specs tr, .specifications tr')->each(function (Crawler $row) use (&$model) {
-            $cells = $row->filter('td');
-            if ($cells->count() >= 2) {
-                $label = $this->cleanText($cells->eq(0)->text());
-                if (stripos($label, 'model') !== false) {
-                    $model = $this->cleanText($cells->eq(1)->text());
+
+        $crawler->filter('#specification .specifications-list')->each(function (Crawler $node) use (&$model) {
+
+            if ($model !== null) {
+                return;
+            }
+
+            // Left label
+            $labelNode = $node->filter('span')->first();
+            if ($labelNode->count() === 0) {
+                return;
+            }
+
+            $label = strtoupper(trim($labelNode->text()));
+
+            if ($label === 'MODEL') {
+                // Right value (inside ul)
+                if ($node->filter('.specifications-list--right ul')->count() > 0) {
+                    $model = trim(
+                        $node->filter('.specifications-list--right ul')->first()->text()
+                    );
                 }
             }
         });
 
-        return $model ?? null;
+        return $model ?: null;
     }
+
 
     private function extractSpecifications(Crawler $crawler): ?array
     {
@@ -722,4 +746,22 @@ class RelianceDigitalScraper extends BaseScraper
 
         return !empty($variants) ? $variants : null;
     }
+
+    private function extractHighlights(Crawler $crawler): ?string
+    {
+        $highlights = [];
+
+        // Reliance Digital - Key Features
+        $crawler->filter('#key_features ul.features li')->each(function (Crawler $node) use (&$highlights) {
+            $text = trim($node->text());
+            if ($text !== '') {
+                $highlights[] = $this->cleanText($text);
+            }
+        });
+
+        return !empty($highlights)
+            ? implode('. ', $highlights)
+            : null;
+    }
+
 }

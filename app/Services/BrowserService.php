@@ -25,7 +25,8 @@ class BrowserService
                 '--disable-features=VizDisplayCompositor',
                 '--disable-background-timer-throttling',
                 '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
+                '--disable-renderer-backgrounding',
+                '--blink-settings=imagesEnabled=false'
             ]
         ];
     }
@@ -36,7 +37,7 @@ class BrowserService
     public function getPageContent(string $url, int $waitTime = 3): ?string
     {
         $attempts = 0;
-        $maxAttempts = 3;
+        $maxAttempts = 2;
         
         while ($attempts < $maxAttempts) {
             try {
@@ -45,25 +46,36 @@ class BrowserService
                 $timeout = $attempts === 0 ? $this->defaultOptions['timeout'] : ($this->defaultOptions['timeout'] * 2);
                 
                 $browsershot = Browsershot::url($url)
-                    ->timeout($timeout)
-                    ->userAgent($this->defaultOptions['userAgent'])
-                    ->windowSize($this->defaultOptions['windowSize'][0], $this->defaultOptions['windowSize'][1])
-                    ->delay($waitTime * 1000); // Convert to milliseconds
-                $browsershot->evaluate("
-                        localStorage.setItem('deliveryPincode', '110001');
-                    ");
+                               ->setChromePath('C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe')
+                                ->timeout($timeout)
+                                ->userAgent($this->defaultOptions['userAgent'])
+                                ->windowSize(
+                                    $this->defaultOptions['windowSize'][0],
+                                    $this->defaultOptions['windowSize'][1]
+                                )
+                                ->setExtraHttpHeaders([
+                                    'Cookie' => 'deliveryPincode=110001'
+                                ])
+                                ->delay($waitTime * 1000);
                 // Add Chrome arguments
                 foreach ($this->defaultOptions['args'] as $arg) {
                     $browsershot->addChromiumArguments([$arg]);
                 }
 
                 // Try with network idle first, then fallback to load event
-                if ($attempts === 0) {
-                    $browsershot->waitUntil('domcontentloaded')->delay(10000);
+                $isProductPage = str_contains($url, '/product/');
+
+                if ($isProductPage) {
+                    $browsershot
+                        ->waitUntil('domcontentloaded')
+                        ->delay(15000);   // fixed wait, no network idle
                 } else {
-                    // Fallback: just wait for load event - removed waitForFunction due to compatibility issues
-                    $browsershot->setDelay(3000); // Wait 3 seconds instead
+                    $browsershot
+                        ->waitUntil('domcontentloaded')
+                        ->delay(6000);
                 }
+
+
 
                 $html = $browsershot->bodyHtml();
 
@@ -272,7 +284,7 @@ class BrowserService
                 ->timeout($this->defaultOptions['timeout'])
                 ->userAgent($this->defaultOptions['userAgent'])
                 ->windowSize($this->defaultOptions['windowSize'][0], $this->defaultOptions['windowSize'][1])
-                ->evaluate("localStorage.setItem('deliveryPincode', '110001');")
+                ->setExtraHttpHeaders(['Cookie' => 'deliveryPincode=110001'])
                 ->waitUntil('domcontentloaded')
                 ->delay(10000)
                 ->save($savePath);
