@@ -200,7 +200,14 @@ class CromaScraper extends BaseScraper
             $data['description'] = $data['description'] ?? $this->extractDescription($crawler);
             $data['brand'] = $data['brand'] ?? $this->extractBrand($crawler);
             $data['category'] = $this->extractCategory($crawler);
+            $data["color"] = $this->extractColour($crawler);
             $data['image_urls'] = $data['image_urls'] ?? $this->extractImages($crawler);
+            $data["weight"] = $this->extractItemWeight($crawler);
+            $data["dimensions"] = $this->extractProductDimensions($crawler);
+            $data["highlights"] = $this->extractHighlights($crawler);
+            $data["manufacturer"] = $this->extractManufacturer($crawler);
+            $data["video_urls"] = $this->extractVideoUrls($crawler);
+            $data["delivery_date"] = $this->extractDeliveryDate($crawler);
 
             // Prices
             if (!isset($data['price']) || !isset($data['sale_price'])) {
@@ -216,12 +223,18 @@ class CromaScraper extends BaseScraper
                 $data['rating'] = $data['rating'] ?? $ratingData['rating'];
                 $data['review_count'] = $data['review_count'] ?? $ratingData['review_count'];
             }
+            $RatingHistogram = $this->extractRatingHistogram($crawler);
+            $data["rating_1_star_percent"] = $RatingHistogram['rating_1_star_percent'];
+            $data["rating_2_star_percent"] = $RatingHistogram['rating_2_star_percent'];
+            $data["rating_3_star_percent"] = $RatingHistogram['rating_3_star_percent'];
+            $data["rating_4_star_percent"] = $RatingHistogram['rating_4_star_percent'];
+            $data["rating_5_star_percent"] = $RatingHistogram['rating_5_star_percent'];
 
             // Additional data
             $data['offers'] = $this->extractOffers($crawler);
             $data['inventory_status'] = $this->extractAvailability($crawler);
             $data['model_name'] = $this->extractModelName($crawler);
-            $data['technical_details'] = $this->extractSpecifications($crawler);
+            $data["technical_details"] = $this->extractTechnicalDetails($crawler);
             $data['variation_attributes'] = $this->extractVariants($crawler);
 
             // Sanitize
@@ -400,90 +413,58 @@ class CromaScraper extends BaseScraper
     {
         $descriptions = [];
 
-        // Key features/highlights
-        $selectors = [
-            '.key-features li',
-            '.product-highlights li',
-            '.feature-list li',
-            'div[data-testid="product-highlights"] li',
-        ];
-
-        foreach ($selectors as $selector) {
-            $crawler->filter($selector)->each(function (Crawler $node) use (&$descriptions) {
-                $text = $this->cleanText($node->text());
-                if ($text && strlen($text) > 10) {
-                    $descriptions[] = $text;
-                }
-            });
-            
-            if (!empty($descriptions)) {
-                break;
-            }
-        }
-
-        // Full description
+        // ✅ ONLY selectors that exist in provided HTML
         $descSelectors = [
-            '.product-description',
-            '.pdp-description',
-            'div[data-testid="product-description"]',
+            '.MuiAccordionDetails-root p',
+            '.accordian-content p',
+            '.overview-fixed-height p',
+            '#overview_inner_container p',
+            '.cp-overview p',
         ];
 
         foreach ($descSelectors as $selector) {
-            $productDesc = $crawler->filter($selector)->first();
-            if ($productDesc->count() > 0) {
-                $descriptions[] = $this->cleanText($productDesc->text());
+            if ($crawler->filter($selector)->count() > 0) {
+                $crawler->filter($selector)->each(function (Crawler $node) use (&$descriptions) {
+                    $text = $this->cleanText($node->text());
+                    if ($text && strlen($text) > 20) {
+                        $descriptions[] = $text;
+                    }
+                });
                 break;
             }
         }
 
-        return !empty($descriptions) ? implode('. ', $descriptions) : null;
+        return !empty($descriptions)
+            ? implode('. ', array_unique($descriptions))
+            : null;
     }
+
 
     private function extractPrices(Crawler $crawler): array
     {
         $prices = ['price' => null, 'sale_price' => null];
 
-        // Sale price selectors
-        $priceSelectors = [
-            'span[data-testid="selling-price"]',
-            '.pdp-price .amount',
-            '.new-price',
-            '.selling-price',
-            '.offer-price',
-            '.final-price',
-        ];
-
-        foreach ($priceSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $price = $this->extractPrice($element->text());
-                if ($price) {
-                    $prices['sale_price'] = $price;
-                    break;
-                }
+        //  Sale price (current price)
+        $saleSelector = '.cp-price.main-product-price .new-price .amount';
+        $element = $crawler->filter($saleSelector)->first();
+        if ($element->count() > 0) {
+            $price = $this->extractPrice($element->text());
+            if ($price) {
+                $prices['sale_price'] = $price;
             }
         }
 
-        // Original price selectors
-        $originalPriceSelectors = [
-            'span[data-testid="mrp-price"]',
-            '.old-price',
-            '.mrp-price',
-            '.was-price',
-            '.strikethrough-price',
-        ];
-
-        foreach ($originalPriceSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $price = $this->extractPrice($element->text());
-                if ($price) {
-                    $prices['price'] = $price;
-                    break;
-                }
+        //  Original price (MRP / old price)
+        $mrpSelector = '.cp-price.discount .old-price .amount';
+        $element = $crawler->filter($mrpSelector)->first();
+        if ($element->count() > 0) {
+            $price = $this->extractPrice($element->text());
+            if ($price) {
+                $prices['price'] = $price;
             }
         }
 
+        // Fallback: if no MRP, use sale price as price
         if (!$prices['price'] && $prices['sale_price']) {
             $prices['price'] = $prices['sale_price'];
         }
@@ -491,28 +472,35 @@ class CromaScraper extends BaseScraper
         return $prices;
     }
 
+
     private function extractOffers(Crawler $crawler): ?string
     {
         $offers = [];
 
         $selectors = [
-            '.offer-text',
+            '.cp-price .dicount-value',
+            '.outer-product-pricebox .offer-text',
             '.discount-info',
-            '.promotion-banner',
             'div[data-testid="offers"]',
         ];
 
         foreach ($selectors as $selector) {
             $crawler->filter($selector)->each(function (Crawler $node) use (&$offers) {
-                $text = $this->cleanText($node->text());
-                if ($text) {
+                $text = trim($node->text());
+                if (!empty($text)) {
                     $offers[] = $text;
                 }
             });
+
+            // Stop at first selector that has offers
+            if (!empty($offers)) {
+                break;
+            }
         }
 
         return !empty($offers) ? implode('; ', $offers) : null;
     }
+
 
     private function extractAvailability(Crawler $crawler): ?string
     {
@@ -544,131 +532,204 @@ class CromaScraper extends BaseScraper
     {
         $data = ['rating' => null, 'review_count' => 0];
 
-        $ratingSelectors = [
-            'span[data-testid="rating"]',
-            '.rating-value',
-            '.star-rating-number',
-            '.review-rating',
-        ];
-
-        foreach ($ratingSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $rating = $this->extractRating($element->text());
-                if ($rating) {
-                    $data['rating'] = $rating;
-                    break;
-                }
+        // ✅ Rating
+        $crawler->filter('div.cp-rating')->each(function (Crawler $node) use (&$data) {
+            // Try nested span first
+            $nestedText = $node->filter('span:first-child')->count() ? trim($node->filter('span:first-child')->text()) : '';
+            
+            // If no nested text, fallback to direct div text
+            if (!$nestedText) {
+                $nestedText = trim($node->text());
             }
-        }
 
-        $reviewSelectors = [
-            'span[data-testid="review-count"]',
-            '.review-count',
-            '.total-reviews',
-            '.reviews-number',
-        ];
-
-        foreach ($reviewSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $reviewCount = $this->extractReviewCount($element->text());
-                if ($reviewCount > 0) {
-                    $data['review_count'] = $reviewCount;
-                    break;
-                }
+            // Extract numeric rating
+            if ($nestedText && preg_match('/\d+(\.\d+)?/', $nestedText, $matches)) {
+                $data['rating'] = (float)$matches[0];
             }
-        }
+        });
+
+        // ✅ Review count
+        $crawler->filter('div.cp-rating span.text a.pr-review')->each(function (Crawler $node) use (&$data) {
+            $text = trim($node->text());
+            if ($text && preg_match('/(\d+)\s+Reviews/', $text, $matches)) {
+                $data['review_count'] = (int)$matches[1];
+            }
+        });
 
         return $data;
     }
 
+
+
     private function extractBrand(Crawler $crawler): ?string
     {
-        $selectors = [
-            'span[data-testid="brand"]',
-            '.brand-name',
-            '.product-brand',
-            'meta[property="product:brand"]',
-        ];
+        $brand = null;
 
-        foreach ($selectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $brand = $element->attr('content') ?: $element->text();
-                if ($brand) {
-                    return $this->cleanText($brand);
-                }
+        // Loop through all spec info blocks
+        $crawler->filter('.cp-specification-spec-info')->each(function (Crawler $node) use (&$brand) {
+
+            if ($brand !== null) {
+                return; // Already found
             }
+
+            $labelNode = $node->filter('.cp-specification-spec-title h4')->first();
+            $valueNode = $node->filter('.cp-specification-spec-details')->first();
+
+            if ($labelNode->count() === 0 || $valueNode->count() === 0) {
+                return;
+            }
+
+            $label = strtoupper(trim($labelNode->text()));
+            $value = trim($valueNode->text());
+
+            // Only pick if label is exactly "BRAND"
+            if ($label === 'BRAND') {
+                $brand = $this->cleanText($value);
+            }
+        });
+
+        return $brand ?: null;
+    }
+
+
+
+    private function extractCategory(Crawler $crawler): ?string
+    {
+        $categories = [];
+
+        $crawler->filter('.cp-breadcrumb ul.list li a')->each(function (Crawler $node) use (&$categories) {
+            $text = trim($node->text());
+            if ($text && !in_array($text, $categories) && strtolower($text) !== 'home') {
+                $categories[] = $text;
+            }
+        });
+
+        return !empty($categories) ? implode(' , ', $categories) : null;
+    }
+
+
+    private function extractColour(Crawler $crawler): ?string
+    {
+        $colourList = [];
+        $colour = null;
+
+        try {
+            $crawler->filter('.cp-specification-spec-details')->each(function (Crawler $node) use (&$colourList) {
+                $titleNode = $node->previousAll('.cp-specification-spec-title')->first();
+
+                if ($titleNode->count() > 0) {
+                    $label = strtolower(trim($titleNode->filter('h4')->text()));
+
+                    if ($label === 'Color') {
+                        $text = trim($node->text());
+                        if ($text !== '') {
+                            $colourList[] = $text;
+                        }
+                    }
+                }
+            });
+
+            if (!empty($colourList)) {
+                $colour = implode(', ', array_unique($colourList));
+            }
+
+        } catch (\Exception $e) {
+            Log::warning('Colour extraction failed', ['error' => $e->getMessage()]);
         }
 
-        // Extract from title
-        $title = $this->extractProductName($crawler);
-        if ($title) {
-            $brands = ['HP', 'Dell', 'Lenovo', 'ASUS', 'Acer', 'Apple', 'MSI', 'Samsung', 'LG', 'Sony', 'Toshiba', 'Croma', 'OnePlus', 'Xiaomi', 'Realme', 'Oppo', 'Vivo'];
-            foreach ($brands as $brand) {
-                if (stripos($title, $brand) !== false) {
-                    return $brand;
+        return $colour ? $this->cleanText($colour) : null;
+    }
+
+    private function extractItemWeight(Crawler $crawler): ?string
+    {
+        $weight = null;
+
+        $crawler->filter('.cp-specification-spec-details')->each(function (Crawler $node) use (&$weight) {
+
+            $titleNode = $node->previousAll('.cp-specification-spec-title')->first();
+
+            if ($titleNode->count() > 0) {
+                $label = strtolower(trim($titleNode->filter('h4')->text()));
+
+                // Match ONLY item weight field
+                if ($label === 'main unit weight') {
+                    $text = trim($node->text());
+                    if ($text !== '') {
+                        $weight = $text;
+                    }
                 }
             }
+        });
+
+        return $weight ? $this->cleanText($weight) : null;
+    }
+    
+    private function extractProductDimensions(Crawler $crawler): ?string
+    {
+        $dimensions = [];
+
+        $crawler->filter('.cp-specification-spec-details')->each(function (Crawler $node) use (&$dimensions) {
+
+            $titleNode = $node->previousAll('.cp-specification-spec-title')->first();
+
+            if ($titleNode->count() > 0) {
+                $label = strtolower(trim($titleNode->filter('h4')->text()));
+                $value = trim($node->text());
+
+                if ($value === '') {
+                    return;
+                }
+
+                // Prefer CM dimensions
+                if ($label === 'dimensions in cm (wxdxh)') {
+                    $dimensions['cm'] = $value. ' cm';
+                }
+
+                // Fallback: Inches
+                if (!isset($dimensions['cm']) && $label === 'dimensions in inches (wxdxh)') {
+                    $dimensions['in'] = $value. ' inch';
+                }
+            }
+        });
+
+        if (!empty($dimensions)) {
+            return $this->cleanText($dimensions['cm'] ?? $dimensions['in']);
         }
 
         return null;
     }
 
-    private function extractCategory(Crawler $crawler): ?string
-    {
-        $selectors = [
-            'nav[data-testid="breadcrumb"] a',
-            '.breadcrumb a',
-            '.category-path a',
-        ];
-
-        $categories = [];
-        foreach ($selectors as $selector) {
-            $crawler->filter($selector)->each(function (Crawler $node) use (&$categories) {
-                $text = $this->cleanText($node->text());
-                if ($text && !in_array($text, $categories) && $text !== 'Home') {
-                    $categories[] = $text;
-                }
-            });
-            if (!empty($categories)) {
-                break;
-            }
-        }
-
-        return !empty($categories) ? implode(' > ', $categories) : null;
-    }
 
     private function extractModelName(Crawler $crawler): ?string
     {
-        $selectors = [
-            'span[data-testid="model"]',
-            '.model-number',
-            '.model-name',
-        ];
-
-        foreach ($selectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                return $this->cleanText($element->text());
-            }
-        }
-
-        // Extract from specs table
         $model = null;
-        $crawler->filter('.product-specs tr, .specifications tr')->each(function (Crawler $row) use (&$model) {
-            $cells = $row->filter('td');
-            if ($cells->count() >= 2) {
-                $label = $this->cleanText($cells->eq(0)->text());
-                if (stripos($label, 'model') !== false) {
-                    $model = $this->cleanText($cells->eq(1)->text());
-                }
+
+        // Loop through all spec info
+        $crawler->filter('.cp-specification-spec-info')->each(function (Crawler $node) use (&$model) {
+
+            if ($model !== null) {
+                return; // Already found, skip
+            }
+
+            $labelNode = $node->filter('.cp-specification-spec-title h4')->first();
+            $valueNode = $node->filter('.cp-specification-spec-details')->first();
+
+            if ($labelNode->count() === 0 || $valueNode->count() === 0) {
+                return;
+            }
+
+            $label = strtoupper(trim($labelNode->text()));
+            $value = trim($valueNode->text());
+
+            if ($label === 'MODEL NUMBER' || $label === 'MODEL SERIES') {
+                $model = $this->cleanText($value);
             }
         });
 
-        return $model;
+        return $model ?: null;
     }
+
+
 
     private function extractSpecifications(Crawler $crawler): ?array
     {
@@ -694,7 +755,8 @@ class CromaScraper extends BaseScraper
         $images = [];
 
         $selectors = [
-            'img[data-testid="product-image"]',
+            'img[data-testid^="super-zoom-img"]', // main gallery images
+            'img[data-testid^="galary-thumb-img"]', // thumbnail images
             '.pdp-product-image img',
             '.product-gallery img',
             '.main-image img',
@@ -702,12 +764,17 @@ class CromaScraper extends BaseScraper
 
         foreach ($selectors as $selector) {
             $crawler->filter($selector)->each(function (Crawler $node) use (&$images) {
-                $src = $node->attr('src') ?: $node->attr('data-src') ?: $node->attr('srcset');
+                // Prefer full-size image in data-zoom, then data-src, then src
+                $src = $node->attr('data-zoom') ?: $node->attr('data-src') ?: $node->attr('src') ?: $node->attr('srcset');
+
                 if ($src) {
+                    // srcset may contain multiple URLs
                     if (strpos($src, ',') !== false) {
                         $srcParts = explode(',', $src);
                         $src = trim(explode(' ', trim($srcParts[0]))[0]);
                     }
+
+                    // Ensure full URL
                     if (strpos($src, 'http') === 0) {
                         $images[] = $src;
                     }
@@ -717,6 +784,7 @@ class CromaScraper extends BaseScraper
 
         return !empty($images) ? array_unique($images) : null;
     }
+
 
     private function extractVariants(Crawler $crawler): ?array
     {
@@ -731,4 +799,153 @@ class CromaScraper extends BaseScraper
 
         return !empty($variants) ? $variants : null;
     }
+
+    private function extractHighlights(Crawler $crawler): ?string
+    {
+        $highlights = [];
+
+        $crawler->filter('.key-features-box .cp-keyfeature ul li')->each(function (Crawler $node) use (&$highlights) {
+            $text = trim($node->text());
+            if (!empty($text)) {
+                $highlights[] = $text;
+            }
+        });
+
+        return !empty($highlights)
+            ? implode('. ', array_unique($highlights))
+            : null;
+    }
+
+    private function extractManufacturer(Crawler $crawler): ?string
+    {
+        $manufacturer = null;
+
+        $crawler->filter('.cp-specification-spec-details')->each(function (Crawler $node) use (&$manufacturer) {
+
+            if ($manufacturer !== null) {
+                return;
+            }
+
+            $titleNode = $node->previousAll('.cp-specification-spec-title')->first();
+
+            if ($titleNode->count() > 0) {
+                $label = strtolower(trim($titleNode->filter('h4')->text()));
+
+                if ($label === 'manufacturer/importer/marketer name & address') {
+                    $text = trim($node->text());
+                    if ($text !== '') {
+                        $manufacturer = $text;
+                    }
+                }
+            }
+        });
+
+        return $manufacturer ? $this->cleanText($manufacturer) : null;
+    }
+
+    private function extractVideoUrls(Crawler $crawler): ?array
+    {
+        $videoUrls = [];
+
+        // ✅ Product gallery video thumbnail (data-video-url)
+        $crawler->filter('.cp-product-gallery img[data-video-url]')->each(function (Crawler $node) use (&$videoUrls) {
+            $url = $node->attr('data-video-url');
+            if ($url) {
+                $videoUrls[] = $url;
+            }
+        });
+
+        // ✅ Video source inside product section
+        $crawler->filter('.cp-product-gallery video source')->each(function (Crawler $node) use (&$videoUrls) {
+            $src = $node->attr('src');
+            if ($src) {
+                $videoUrls[] = $src;
+            }
+        });
+
+        // ✅ Embedded videos (YouTube / Vimeo)
+        $crawler->filter('iframe[src*="youtube"], iframe[src*="vimeo"]')->each(function (Crawler $node) use (&$videoUrls) {
+            $src = $node->attr('src');
+            if ($src) {
+                $videoUrls[] = $src;
+            }
+        });
+
+        return !empty($videoUrls) ? array_values(array_unique($videoUrls)) : null;
+    }
+
+    private function extractDeliveryDate(Crawler $crawler): ?string
+    {
+
+        $node = $crawler->filter('.cp-ship-opt .del-date p.pdp-delivery-details')->first();
+
+        if ($node->count() > 0) {
+            $date = trim($node->text());
+            if (!empty($date)) {
+                return $this->cleanText($date);
+            }
+        }
+
+        return null;
+    }
+
+    private function extractTechnicalDetails(Crawler $crawler): ?array
+    {
+        $details = [];
+
+        $crawler->filter('.cp-specification-spec-info')->each(function (Crawler $ul) use (&$details) {
+
+            $keyNode = $ul->filter('.cp-specification-spec-title h4')->first();
+            $valueNode = $ul->filter('.cp-specification-spec-details')->first();
+
+            if ($keyNode->count() > 0 && $valueNode->count() > 0) {
+                $key = trim(preg_replace('/\s+/', ' ', $keyNode->text()));
+                $value = trim(preg_replace('/\s+/', ' ', $valueNode->text()));
+
+                if ($key && $value) {
+                    $details[$key] = $value;
+                }
+            }
+        });
+
+        return !empty($details) ? $details : null;
+    }
+
+    private function extractRatingHistogram(Crawler $crawler): array
+    {
+        $ratings = [
+            'rating_5_star_percent' => null,
+            'rating_4_star_percent' => null,
+            'rating_3_star_percent' => null,
+            'rating_2_star_percent' => null,
+            'rating_1_star_percent' => null,
+        ];
+
+        // Loop through each star row
+        $crawler->filter('div.barAndStar, div.barAndStar-no-review')->each(function (Crawler $node) use (&$ratings) {
+
+            // Star value: text inside .star-text, e.g., "5 star"
+            $starText = $node->filter('.star-text')->first()->text('');
+            if (preg_match('/(\d+)\s*star/i', $starText, $matches)) {
+                $star = (int)$matches[1];
+
+                // Get width from the bar inside .bar-container > div
+                $barNode = $node->filter('.bar-container div')->first();
+                if ($barNode->count() > 0) {
+                    $style = $barNode->attr('style');
+                    if (preg_match('/width:\s*([\d.]+)%/i', $style, $matchesWidth)) {
+                        $ratings["rating_{$star}_star_percent"] = (float)$matchesWidth[1];
+                    }
+                }
+            }
+        });
+
+        return $ratings;
+    }
+
+
+
+
+
+
 }

@@ -24,7 +24,7 @@ class RelianceDigitalReviewScraper
     {
         Log::info("Starting Reliance Digital review scraping", ['limit' => $limit]);
 
-        $query = Product::where('platform', 'reliance_digital')
+        $query = Product::where('platform', 'reliancedigital')
             ->whereNotNull('product_url')
             ->whereNotNull('sku');
 

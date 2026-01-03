@@ -15,9 +15,9 @@ class RelianceDigitalScraper extends BaseScraper
         $this->useJavaScript = true;
         $this->paginationConfig = [
             'type' => 'regular',
-            'max_pages' => 5,
-            'page_param' => 'page',
-            'has_next_selector' => '.pagination .next:not(.disabled)',
+            'max_pages' => 3,
+            'page_param' => 'page_no',
+            'has_next_selector' => '.pagination span[aria-label="Goto Next Page"]',
             'delay_between_pages' => [1, 2], // OPTIMIZED: Reduced delays
             'retry_failed_pages' => true,
             'max_retries_per_page' => 2 // OPTIMIZED: Reduced retries
@@ -199,7 +199,13 @@ class RelianceDigitalScraper extends BaseScraper
             $data['description'] = $data['description'] ?? $this->extractDescription($crawler);
             $data['brand'] = $data['brand'] ?? $this->extractBrand($crawler);
             $data['category'] = $this->extractCategory($crawler);
+            $data["seller_name"] = $this->extractSellerName($crawler);
+            $data["color"] = $this->extractColour($crawler);
             $data['image_urls'] = $data['image_urls'] ?? $this->extractImages($crawler);
+            $data["manufacturer"] = $this->extractManufacturer($crawler);
+            $data["dimensions"] = $this->extractProductDimensions($crawler);
+            $data["weight"] = $this->extractItemWeight($crawler);
+
 
             // Prices
             if (!isset($data['price']) || !isset($data['sale_price'])) {
@@ -215,14 +221,23 @@ class RelianceDigitalScraper extends BaseScraper
                 $data['rating'] = $data['rating'] ?? $ratingData['rating'];
                 $data['review_count'] = $data['review_count'] ?? $ratingData['review_count'];
             }
+            $RatingHistogram = $this->extractRatingHistogram($crawler);
+            $data["rating_1_star_percent"] = $RatingHistogram['rating_1_star_percent'];
+            $data["rating_2_star_percent"] = $RatingHistogram['rating_2_star_percent'];
+            $data["rating_3_star_percent"] = $RatingHistogram['rating_3_star_percent'];
+            $data["rating_4_star_percent"] = $RatingHistogram['rating_4_star_percent'];
+            $data["rating_5_star_percent"] = $RatingHistogram['rating_5_star_percent'];
 
             // Additional data
             $data['offers'] = $this->extractOffers($crawler);
             $data["highlights"] = $this->extractHighlights($crawler);
             $data['inventory_status'] = $this->extractAvailability($crawler);
             $data['model_name'] = $this->extractModelName($crawler);
-            $data['technical_details'] = $this->extractSpecifications($crawler);
+            $data["delivery_price"] = $this->extractDeliveryPrice($crawler);
+            $data["delivery_date"] = $this->extractDeliveryDate($crawler);
+            $data["technical_details"] = $this->extractTechnicalDetails($crawler);
             $data['variation_attributes'] = $this->extractVariants($crawler);
+            $data["additional_information"] = $this->extractAdditionalInformation($crawler);
 
             // Sanitize
             $data = DataSanitizer::sanitizeProductData($data);
@@ -390,46 +405,35 @@ class RelianceDigitalScraper extends BaseScraper
 
     private function extractDescription(Crawler $crawler): ?string
     {
-        $descriptions = [];
+        $descNode = $crawler->filter('div.product-long-description')->first();
 
-        // Key features/highlights
-        $selectors = [
-            '.pdp__product-highlights li',
-            '.product-features li',
-            '.key-features li',
-            'div[data-testid="product-highlights"] li',
-        ];
+        if ($descNode->count() === 0) {
+            return null;
+        }
 
-        foreach ($selectors as $selector) {
-            $crawler->filter($selector)->each(function (Crawler $node) use (&$descriptions) {
-                $text = $this->cleanText($node->text());
-                if ($text && strlen($text) > 10) {
-                    $descriptions[] = $text;
-                }
-            });
-            
-            if (!empty($descriptions)) {
-                break;
+        $texts = [];
+
+        // Case 1: Paragraph-based description
+        $descNode->filter('p')->each(function (Crawler $p) use (&$texts) {
+            $text = trim(preg_replace('/\s+/', ' ', $p->text()));
+            if ($text && strlen($text) > 20) {
+                $texts[] = $text;
+            }
+        });
+
+        // Case 2: Plain text only (no <p>)
+        if (empty($texts)) {
+            $text = trim(preg_replace('/\s+/', ' ', $descNode->text()));
+            if ($text && strlen($text) > 15) {
+                $texts[] = $text;
             }
         }
 
-        // Full description
-        $descSelectors = [
-            '.product-description',
-            '.pdp-description',
-            'div[data-testid="product-description"]',
-        ];
-
-        foreach ($descSelectors as $selector) {
-            $productDesc = $crawler->filter($selector)->first();
-            if ($productDesc->count() > 0) {
-                $descriptions[] = $this->cleanText($productDesc->text());
-                break;
-            }
-        }
-
-        return !empty($descriptions) ? implode('. ', $descriptions) : null;
+        return !empty($texts)
+            ? $this->cleanText(implode(' ', $texts))
+            : null;
     }
+
 
     private function extractPrices(Crawler $crawler): array
     {
@@ -652,6 +656,29 @@ class RelianceDigitalScraper extends BaseScraper
 
         return !empty($categories) ? implode(' ,', $categories) : null;
     }
+    
+    private function extractSellerName(Crawler $crawler): ?string
+    {
+        $seller = null;
+
+        $crawler->filter('li.specifications-list')->each(
+            function (Crawler $node) use (&$seller) {
+
+                $label = strtolower(trim($node->filter('span')->eq(0)->text('')));
+
+                if (strpos($label, 'seller') !== false) {
+
+                    $valueNode = $node->filter('.specifications-list--right ul');
+
+                    if ($valueNode->count() > 0) {
+                        $seller = trim($valueNode->text());
+                    }
+                }
+            }
+        );
+
+        return $seller ? $this->cleanText($seller) : null;
+    }
 
     private function extractModelName(Crawler $crawler): ?string
     {
@@ -684,24 +711,121 @@ class RelianceDigitalScraper extends BaseScraper
         return $model ?: null;
     }
 
-
-    private function extractSpecifications(Crawler $crawler): ?array
+    private function extractColour(Crawler $crawler): ?string
     {
-        $specs = [];
+        $colour = null;
 
-        $crawler->filter('.product-specs tr, .specifications tr, .tech-specs tr')->each(function (Crawler $row) use (&$specs) {
-            $cells = $row->filter('td');
-            if ($cells->count() >= 2) {
-                $label = $this->cleanText($cells->eq(0)->text());
-                $value = $this->cleanText($cells->eq(1)->text());
-                
-                if ($label && $value) {
-                    $specs[$label] = $value;
+        $crawler->filter('li.specifications-list')->each(
+            function (Crawler $node) use (&$colour) {
+
+                $label = strtolower(trim($node->filter('span')->eq(0)->text('')));
+
+                if (
+                    strpos($label, 'color') !== false ||
+                    strpos($label, 'colour') !== false
+                ) {
+                    $valueNode = $node->filter('.specifications-list--right ul');
+
+                    if ($valueNode->count() > 0) {
+                        $colour = trim($valueNode->text());
+                    }
                 }
             }
-        });
+        );
 
-        return !empty($specs) ? $specs : null;
+        return $colour ? $this->cleanText($colour) : null;
+    }
+
+    
+    private function extractItemWeight(Crawler $crawler): ?string
+    {
+        $weight = null;
+
+        $crawler->filter('li.specifications-list')->each(
+            function (Crawler $node) use (&$weight) {
+
+                $label = strtolower(trim($node->filter('span')->eq(0)->text('')));
+
+                if (strpos($label, 'weight') !== false) {
+
+                    $valueNode = $node->filter('.specifications-list--right ul');
+
+                    if ($valueNode->count() > 0) {
+                        $weight = $this->cleanText($valueNode->text());
+                    }
+                }
+            }
+        );
+
+        return $weight;
+    }
+
+    private function extractProductDimensions(Crawler $crawler): ?string
+    {
+        $dimensions = [
+            'length' => null,
+            'width'  => null,
+            'height' => null,
+        ];
+
+        $crawler->filter('li.specifications-list')->each(
+            function (Crawler $node) use (&$dimensions) {
+
+                $label = strtolower(trim($node->filter('span')->eq(0)->text('')));
+
+                $valueNode = $node->filter('.specifications-list--right ul');
+                $value = $valueNode->count() > 0
+                    ? trim($valueNode->text())
+                    : null;
+
+                if (!$value) {
+                    return;
+                }
+
+                if (strpos($label, 'item length') !== false) {
+                    $dimensions['length'] = $value;
+                } elseif (strpos($label, 'item width') !== false) {
+                    $dimensions['width'] = $value;
+                } elseif (strpos($label, 'item height') !== false) {
+                    $dimensions['height'] = $value;
+                }
+            }
+        );
+
+        // Maintain order: L x W x H
+        $final = array_filter([
+            $dimensions['length'],
+            $dimensions['width'],
+            $dimensions['height'],
+        ]);
+
+        return !empty($final)
+            ? implode(' x ', $final)
+            : null;
+    }
+
+    
+    private function extractManufacturer(Crawler $crawler): ?string
+    {
+        $manufacturer = null;
+
+        $crawler->filter('li.specifications-list')->each(
+            function (Crawler $node) use (&$manufacturer) {
+
+                $label = trim($node->filter('span')->eq(0)->text(''));
+
+                if (stripos($label, 'manufacturer') !== false) {
+
+                    $valueNode = $node->filter('.specifications-list--right ul');
+
+                    if ($valueNode->count() > 0) {
+                        $manufacturer = $this->cleanText($valueNode->text());
+                    }
+                }
+            }
+        );
+
+        return $manufacturer;
     }
 
     private function extractImages(Crawler $crawler): ?array
@@ -763,5 +887,151 @@ class RelianceDigitalScraper extends BaseScraper
             ? implode('. ', $highlights)
             : null;
     }
+    private function extractTechnicalDetails(Crawler $crawler): ?array
+    {
+        $details = [];
+
+        // Each specification row
+        $selector = 'li.specifications-list';
+
+        if ($crawler->filter($selector)->count() > 0) {
+
+            $crawler->filter($selector)->each(function (Crawler $node) use (&$details) {
+
+                // Key
+                $key = trim($node->filter('span')->eq(0)->text(''));
+
+                // Value (deep inside ul)
+                $valueNode = $node->filter('.specifications-list--right ul');
+
+                $value = $valueNode->count()
+                    ? trim($valueNode->text(''))
+                    : '';
+
+                // Cleanup
+                $key   = preg_replace('/\s+/', ' ', $key);
+                $value = preg_replace('/\s+/', ' ', $value);
+
+                if (!empty($key) && !empty($value)) {
+                    $details[$key] = $value;
+                }
+            });
+        }
+
+        return !empty($details) ? $details : null;
+    }
+
+    private function extractDeliveryDate(Crawler $crawler): ?string
+    {
+        $node = $crawler->filter('h5.delivery-section--header')->first();
+
+        if ($node->count() > 0) {
+            $text = trim($node->text());
+
+            // Extract date part after "by"
+            if (preg_match('/by\s+(.+)$/i', $text, $matches)) {
+                return $this->cleanText(trim($matches[1]));
+            }
+        }
+
+        return null;
+    }
+
+    private function extractDeliveryPrice(Crawler $crawler): ?string
+    {
+        $node = $crawler->filter('h5.delivery-section--header')->first();
+
+        if ($node->count() > 0) {
+            $text = strtolower(trim($node->text()));
+
+            if (strpos($text, 'free') !== false) {
+                return 'Free';
+            }
+
+            // Future-proof: paid delivery
+            if (preg_match('/₹\s?\d+/', $text, $matches)) {
+                return $this->cleanText($matches[0]);
+            }
+        }
+
+        return null;
+    }
+
+    private function extractRatingHistogram(Crawler $crawler): array
+    {
+        $ratings = [
+            'rating_5_star_percent' => null,
+            'rating_4_star_percent' => null,
+            'rating_3_star_percent' => null,
+            'rating_2_star_percent' => null,
+            'rating_1_star_percent' => null,
+        ];
+
+        $crawler->filter('.rd-feedback-service-progress-row')->each(
+            function (Crawler $row) use (&$ratings) {
+
+                // Star value (5,4,3,2,1)
+                $star = (int) trim(
+                    $row->filter('.rd-feedback-service-rating-text')->text('0')
+                );
+
+                // Progress bar width percentage
+                $bar = $row->filter('[style*="width"]')->first();
+
+                if ($star >= 1 && $star <= 5 && $bar->count() > 0) {
+
+                    $style = $bar->attr('style');
+
+                    if (preg_match('/width:\s*([\d.]+)%/i', $style, $matches)) {
+                        $ratings["rating_{$star}_star_percent"] = (float) $matches[1];
+                    }
+                }
+            }
+        );
+
+        return $ratings;
+    }
+    
+    private function extractAdditionalInformation(Crawler $crawler): ?array
+    {
+        $info = [];
+
+        $rows = $crawler->filter('table.flix-std-specs-table tr');
+
+        if ($rows->count() === 0) {
+            return null;
+        }
+
+        $rows->each(function (Crawler $row) use (&$info) {
+
+            $keyNode = $row->filter('th');
+            $valueNode = $row->filter('td');
+
+            if ($keyNode->count() === 0 || $valueNode->count() === 0) {
+                return;
+            }
+
+            $key = trim(preg_replace('/\s+/', ' ', $keyNode->text()));
+
+            // Preserve <br> as comma-separated values
+            $value = trim(
+                preg_replace(
+                    '/\s+/',
+                    ' ',
+                    str_replace("\n", ', ', $valueNode->text())
+                )
+            );
+
+            if ($key && $value) {
+                $info[$key] = $value;
+            }
+        });
+
+        return !empty($info) ? $info : null;
+    }
+
+
+
+
 
 }

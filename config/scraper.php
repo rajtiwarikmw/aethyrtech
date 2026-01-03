@@ -52,8 +52,8 @@ return [
             'name' => 'Reliance Digital',
             'base_url' => 'https://www.reliancedigital.in',
             'category_urls' => [
-                'https://www.reliancedigital.in/collection/canon-printers',
-                'https://www.reliancedigital.in/collection/hp-printers',
+                'https://www.reliancedigital.in/collection/hp-printers?internal_source=navigation&page_no=1&page_size=36&page_type=number',
+                'https://www.reliancedigital.in/collection/canon-printers?internal_source=navigation&page_no=1&page_size=24&page_type=number',
                 'https://www.reliancedigital.in/collection/brother-printers',
                 'https://www.reliancedigital.in/collection/epson-printers',
             ]
