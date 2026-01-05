@@ -62,7 +62,10 @@ return [
             'name' => 'Croma',
             'base_url' => 'https://www.croma.com',
             'category_urls' => [
-                'https://www.croma.com/computers-tablets/printers/c/31',
+                'https://www.croma.com/computers-tablets/printers/c/31?q=%3Arelevance%3ASG-ManufacturerDetails-Brand%3ACanon',
+                'https://www.croma.com/computers-tablets/printers/c/31?q=%3Arelevance%3ASG-ManufacturerDetails-Brand%3AEpson',
+                'https://www.croma.com/computers-tablets/printers/c/31?q=%3Aprice-asc%3ASG-ManufacturerDetails-Brand%3AHP%3Aprice_group%3A10%2C001+-+20%2C000%3Aprice_group%3A5%2C001+-+10%2C000%3Aprice_group%3A20%2C001+-+30%2C000%3Aprice_group%3A1%2C001+-+1%2C500%3Aprice_group%3A50%2C001+-+60%2C000',
+                'https://www.croma.com/computers-tablets/printers/c/31?q=%3Aprice-desc%3ASG-ManufacturerDetails-Brand%3AHP%3Aprice_group%3A10%2C001+-+20%2C000%3Aprice_group%3A5%2C001+-+10%2C000%3Aprice_group%3A20%2C001+-+30%2C000%3Aprice_group%3A1%2C001+-+1%2C500%3Aprice_group%3A50%2C001+-+60%2C000',
             ]
         ],
         'blinkit' => [

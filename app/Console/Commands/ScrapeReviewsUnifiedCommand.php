@@ -5,12 +5,13 @@ namespace App\Console\Commands;
 use App\Services\Scrapers\AmazonReviewScraper;
 use App\Services\Scrapers\FlipkartReviewScraper;
 use App\Services\Scrapers\VijaySalesReviewScraper;
+use App\Services\Scrapers\RelianceDigitalReviewScraper;
 use Illuminate\Console\Command;
 
 class ScrapeReviewsUnifiedCommand extends Command
 {
     protected $signature = 'scraper:reviews-platform 
-                            {platform : Platform to scrape (amazon, flipkart, vijaysales, all)}
+                            {platform : Platform to scrape (amazon, flipkart, vijaysales, reliancedigital, all)}
                             {--product-ids=* : Specific product IDs to scrape}
                             {--limit= : Limit number of products to scrape}';
 
@@ -50,6 +51,15 @@ class ScrapeReviewsUnifiedCommand extends Command
                 $this->info('Scraping VijaySales reviews...');
                 $scraper = new VijaySalesReviewScraper();
                 $stats['vijaysales'] = $scraper->scrapeReviews(
+                    !empty($productIds) ? array_map('intval', $productIds) : null,
+                    $limit
+                );
+            }
+
+            if ($platform === 'all' || $platform === 'reliancedigital') {
+                $this->info('Scraping RelianceDigital reviews...');
+                $scraper = new RelianceDigitalReviewScraper();
+                $stats['reliancedigital'] = $scraper->scrapeAllReviews(
                     !empty($productIds) ? array_map('intval', $productIds) : null,
                     $limit
                 );

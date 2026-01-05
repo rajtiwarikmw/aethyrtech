@@ -9,7 +9,7 @@ class ManageKeywordsCommand extends Command
 {
     protected $signature = 'keywords:manage 
                             {action : Action to perform (list, add, activate, deactivate, delete)}
-                            {platform? : Platform (amazon, flipkart, vijaysales)}
+                            {platform? : Platform (amazon, flipkart, vijaysales, reliancedigital)}
                             {--keyword= : Keyword text}
                             {--id= : Keyword ID}
                             {--file= : File containing keywords (one per line)}';

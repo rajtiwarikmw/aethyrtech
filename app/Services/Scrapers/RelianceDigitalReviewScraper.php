@@ -123,23 +123,44 @@ class RelianceDigitalReviewScraper
     {
         try {
             Log::debug("Fetching Reliance Digital reviews page with JavaScript", ['url' => $url]);
-
-            $html = Browsershot::url($url)
+            $isProductPage = strpos($url, '/product/') !== false;
+            
+            $timeout = $isProductPage ? 45 : 30;
+            
+            $browsershot = Browsershot::url($url)
                 ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
                 ->setExtraHttpHeaders([
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                     'Accept-Language' => 'en-US,en;q=0.9',
                     'Accept-Encoding' => 'gzip, deflate, br',
                     'Connection' => 'keep-alive',
+                    'Upgrade-Insecure-Requests' => '1',
+                    'Sec-Fetch-Dest' => 'document',
+                    'Sec-Fetch-Mode' => 'navigate',
+                    'Sec-Fetch-Site' => 'none',
                 ])
-                ->waitUntilNetworkIdle()
-                ->timeout(60)
-                ->bodyHtml();
+                ->timeout($timeout);
+            
+            // $browsershot->waitForFunction(
+            //     '() => document.readyState === "complete"',
+            //     ['polling' => 500, 'timeout' => $timeout * 1000]
+            // );
+            
+            $html = $browsershot->bodyHtml();
 
-            if (strlen($html) < 1000) {
+            $contentLength = strlen($html);
+
+            Log::debug("Reliance Digital page response", [
+                'status_code' => 200,
+                'content_length' => $contentLength,
+                'is_product_page' => $isProductPage,
+                'timeout_used' => $timeout
+            ]);
+
+            if ($contentLength < 1000) {
                 Log::warning("Reliance Digital returned suspiciously small response", [
-                    'url' => $url,
-                    'length' => strlen($html)
+                    'content_length' => $contentLength,
+                    'url' => $url
                 ]);
                 return null;
             }
@@ -150,9 +171,9 @@ class RelianceDigitalReviewScraper
                 Log::error("Reliance Digital returned error page", ['url' => $url]);
                 
                 // Save HTML for debugging
-                $debugFile = storage_path('logs/reliancedigital_reviews_debug_' . time() . '.html');
-                file_put_contents($debugFile, $html);
-                Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
+                //$debugFile = storage_path('logs/reliancedigital_reviews_debug_' . time() . '.html');
+                // file_put_contents($debugFile, $html);
+                // Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
                 
                 return null;
             }
@@ -178,13 +199,8 @@ class RelianceDigitalReviewScraper
         try {
             // Reliance Digital review container selectors
             $containerSelectors = [
-                'div[data-testid="review-item"]',
-                'div[data-testid="review"]',
-                '.review-item',
-                '.review-card',
-                '.customer-review',
-                'div[class*="Review"]',
-                '.pdp-review-item',
+                'div.rd-feedback-service-review-container', // ✅ exact
+                'div[class*="feedback-service-review"]',
             ];
 
             $reviewNodes = null;
@@ -220,20 +236,28 @@ class RelianceDigitalReviewScraper
             // Extract each review
             $reviewNodes->each(function (Crawler $node) use (&$reviews, $productId, $sku) {
                 try {
+                    $reviewerName = $this->extractReviewerName($node);
+                    $reviewDate   = $this->extractReviewDate($node);
+
                     $reviewData = [
                         'product_id' => $productId,
                         'sku' => $sku,
-                        'platform' => 'reliance_digital',
-                        'review_id' => $this->extractReviewId($node),
-                        'reviewer_name' => $this->extractReviewerName($node),
+                        'platform' => 'reliancedigital',
+                        'reviewer_name' => $reviewerName,
                         'rating' => $this->extractRating($node),
                         'review_title' => $this->extractReviewTitle($node),
                         'review_text' => $this->extractReviewText($node),
-                        'review_date' => $this->extractReviewDate($node),
+                        'review_date' => $reviewDate,
                         'verified_purchase' => $this->extractVerifiedPurchase($node),
                         'helpful_count' => $this->extractHelpfulCount($node),
                         'images' => $this->extractReviewImages($node),
                     ];
+
+                    // 🔥 review_id AFTER all data exists
+                    $reviewData['review_id'] = $this->buildReviewId(
+                        $reviewerName,
+                        $reviewDate
+                    );
 
                     // Calculate sentiment based on rating
                     if ($reviewData['rating']) {
@@ -267,6 +291,24 @@ class RelianceDigitalReviewScraper
 
         return $reviews;
     }
+    
+    protected function buildReviewId(string $reviewer, ?string $date): string
+    {
+        // Clean reviewer name
+        $reviewer = strtolower(trim($reviewer ?: 'anonymous'));
+        $reviewer = preg_replace('/[^a-z0-9]+/i', '-', $reviewer);
+
+        // Date already normalized as Y-m-d
+        if ($date) {
+            $dateForId = str_replace('-', '', $date); // 2025-05-20 → 20250520
+        } else {
+            $dateForId = now()->format('Ymd');
+        }
+
+        // FINAL ID: FD_reviewer_date
+        return 'FD_' . $reviewer . '_' . $dateForId;
+    }
+
 
     /**
      * Extract review ID
@@ -290,11 +332,7 @@ class RelianceDigitalReviewScraper
     protected function extractReviewerName(Crawler $node): ?string
     {
         $selectors = [
-            'span[data-testid="reviewer-name"]',
-            '.reviewer-name',
-            '.review-author',
-            '.author-name',
-            '.customer-name',
+            '.rd-feedback-service-jds-desk-body-s',
         ];
 
         foreach ($selectors as $selector) {
@@ -312,32 +350,15 @@ class RelianceDigitalReviewScraper
      */
     protected function extractRating(Crawler $node): ?float
     {
-        $selectors = [
-            'span[data-testid="rating"]',
-            '.rating-value',
-            '.star-rating',
-            '.review-rating',
-        ];
+        try {
+            // Count only yellow stars (filled)
+            $filledStars = $node->filter('svg path[fill="#FFD947"]')->count();
 
-        foreach ($selectors as $selector) {
-            $element = $node->filter($selector);
-            if ($element->count() > 0) {
-                $text = $element->first()->text();
-                
-                // Extract number from text
-                if (preg_match('/(\d+\.?\d*)/', $text, $matches)) {
-                    return (float) $matches[1];
-                }
+            return $filledStars > 0 ? (float) $filledStars : null;
 
-                // Count filled stars
-                $stars = $node->filter('.star.filled, .star-filled, svg.filled');
-                if ($stars->count() > 0) {
-                    return (float) $stars->count();
-                }
-            }
+        } catch (\Exception $e) {
+            return null;
         }
-
-        return null;
     }
 
     /**
@@ -346,11 +367,7 @@ class RelianceDigitalReviewScraper
     protected function extractReviewTitle(Crawler $node): ?string
     {
         $selectors = [
-            'h3[data-testid="review-title"]',
-            '.review-title',
-            '.review-heading',
-            'h4',
-            'h5',
+            '.rd-feedback-service-review-row-title',
         ];
 
         foreach ($selectors as $selector) {
@@ -369,12 +386,7 @@ class RelianceDigitalReviewScraper
     protected function extractReviewText(Crawler $node): ?string
     {
         $selectors = [
-            'div[data-testid="review-text"]',
-            '.review-text',
-            '.review-content',
-            '.review-body',
-            '.review-description',
-            'p',
+            '.rd-feedback-service-review-row-description',
         ];
 
         foreach ($selectors as $selector) {
@@ -395,31 +407,27 @@ class RelianceDigitalReviewScraper
      */
     protected function extractReviewDate(Crawler $node): ?string
     {
-        $selectors = [
-            'span[data-testid="review-date"]',
-            '.review-date',
-            '.review-time',
-            'time',
-            '.date',
-        ];
-
-        foreach ($selectors as $selector) {
-            $element = $node->filter($selector);
-            if ($element->count() > 0) {
-                $dateText = trim($element->first()->text());
-                
-                // Try to parse date
-                try {
-                    $date = new \DateTime($dateText);
-                    return $date->format('Y-m-d');
-                } catch (\Exception $e) {
-                    return $dateText;
-                }
-            }
+        if ($node->filter('.rd-feedback-service-review-row-top-right')->count() === 0) {
+            return null;
         }
+
+        $rawDate = trim(
+            $node->filter('.rd-feedback-service-review-row-top-right')->first()->text()
+        );
+
+        // Reliance Digital format: d/m/Y or dd/m/Y
+        $date = \DateTime::createFromFormat('d/m/Y', $rawDate);
+
+        if ($date instanceof \DateTime) {
+            return $date->format('Y-m-d'); // ✅ normalized
+        }
+
+        // ❌ agar parse fail ho, raw return mat karo
+        Log::warning('Invalid review date format', ['raw' => $rawDate]);
 
         return null;
     }
+
 
     /**
      * Extract verified purchase status
@@ -427,10 +435,7 @@ class RelianceDigitalReviewScraper
     protected function extractVerifiedPurchase(Crawler $node): bool
     {
         $selectors = [
-            'span[data-testid="verified-badge"]',
-            '.verified-purchase',
-            '.verified-badge',
-            '.verified-buyer',
+            '.rd-feedback-service-certified-buyer-container',
         ];
 
         foreach ($selectors as $selector) {
@@ -450,10 +455,7 @@ class RelianceDigitalReviewScraper
     protected function extractHelpfulCount(Crawler $node): int
     {
         $selectors = [
-            'span[data-testid="helpful-count"]',
-            '.helpful-count',
-            '.vote-count',
-            '.thumbs-up-count',
+            '.rd-feedback-service-vote-text',
         ];
 
         foreach ($selectors as $selector) {
