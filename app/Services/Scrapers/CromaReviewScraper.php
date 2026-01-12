@@ -124,35 +124,55 @@ class CromaReviewScraper
         try {
             Log::debug("Fetching Croma reviews page with JavaScript", ['url' => $url]);
 
-            $html = Browsershot::url($url)
+            $isProductPage = strpos($url, '/p/') !== false;
+            
+            $timeout = $isProductPage ? 120 : 30;
+            
+            $browsershot = Browsershot::url($url)
                 ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
                 ->setExtraHttpHeaders([
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                     'Accept-Language' => 'en-US,en;q=0.9',
                     'Accept-Encoding' => 'gzip, deflate, br',
                     'Connection' => 'keep-alive',
+                    'Upgrade-Insecure-Requests' => '1',
+                    'Sec-Fetch-Dest' => 'document',
+                    'Sec-Fetch-Mode' => 'navigate',
+                    'Sec-Fetch-Site' => 'none',
                 ])
-                ->waitUntilNetworkIdle()
-                ->timeout(60)
-                ->bodyHtml();
+                ->timeout($timeout);
+                
+            
+            $browsershot->waitFor('.pdp-review-item', $timeout * 1000);
+            
+            $html = $browsershot->bodyHtml();
 
-            if (strlen($html) < 1000) {
+            $contentLength = strlen($html);
+
+            Log::debug("Croma page response", [
+                'status_code' => 200,
+                'content_length' => $contentLength,
+                'is_product_page' => $isProductPage,
+                'timeout_used' => $timeout
+            ]);
+
+            if ($contentLength < 1000) {
                 Log::warning("Croma returned suspiciously small response", [
-                    'url' => $url,
-                    'length' => strlen($html)
+                    'content_length' => $contentLength,
+                    'url' => $url
                 ]);
                 return null;
             }
 
-            // Check for redirects to homepage
-            if (strpos($html, '<title>Croma Electronics | Online Electronics Shopping') !== false &&
-                strpos($url, '/p/') !== false) {
-                Log::error("Croma redirected product page to homepage", ['url' => $url]);
+            // Check for error pages
+            if (strpos($html, 'page was not found') !== false ||
+                strpos($html, 'Oops!') !== false) {
+                Log::error("Croma returned error page", ['url' => $url]);
                 
                 // Save HTML for debugging
-                $debugFile = storage_path('logs/croma_reviews_redirect_' . time() . '.html');
-                file_put_contents($debugFile, $html);
-                Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
+                //$debugFile = storage_path('logs/reliancedigital_reviews_debug_' . time() . '.html');
+                // file_put_contents($debugFile, $html);
+                // Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
                 
                 return null;
             }
@@ -178,14 +198,10 @@ class CromaReviewScraper
         try {
             // Croma review container selectors
             $containerSelectors = [
+                'ul.list > li.list-item',          // current Croma PDP (most reliable)
+                'li.list-item',                    // fallback
                 'div[data-testid="review-item"]',
-                'div[data-testid="review"]',
-                '.review-item',
-                '.review-card',
-                '.customer-review',
-                'div[class*="Review"]',
                 '.pdp-review-item',
-                '.review-container',
             ];
 
             $reviewNodes = null;
@@ -211,9 +227,9 @@ class CromaReviewScraper
                 ]);
                 
                 // Save HTML for debugging
-                $debugFile = storage_path('logs/croma_reviews_debug_no_reviews_' . time() . '.html');
-                file_put_contents($debugFile, $crawler->html());
-                Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
+                // $debugFile = storage_path('logs/croma_reviews_debug_no_reviews_' . time() . '.html');
+                // file_put_contents($debugFile, $crawler->html());
+                // Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
                 
                 return [];
             }

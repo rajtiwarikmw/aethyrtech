@@ -39,9 +39,9 @@ class AmazonScraper extends BaseScraper
         try {
             // Amazon product links patterns
             $selectors = [
-                'div[data-cy="title-recipe"] > a',
-                'a.a-link-normal.s-no-outline',
-                'div[data-cy="title-recipe"] > a.a-link-normal',
+                '#centerCol #productTitle',
+                '#centerCol #title span',
+                '#centerCol h1#title span',
             ];
 
             foreach ($selectors as $selector) {
@@ -271,11 +271,11 @@ class AmazonScraper extends BaseScraper
 
         // Current price (sale price)
         $salePriceSelectors = [
-            ".a-price-whole", // Main price
-            "#priceblock_dealprice",
-            "#priceblock_ourprice",
-            ".a-price-current .a-offscreen",
-            ".a-price .a-offscreen"
+            "#centerCol .a-price-whole", // Main price
+            "#centerCol  #priceblock_dealprice",
+            "#centerCol  #priceblock_ourprice",
+            "#centerCol  .a-price-current .a-offscreen",
+            "#centerCol  .a-price .a-offscreen"
         ];
 
         foreach ($salePriceSelectors as $selector) {
@@ -292,9 +292,9 @@ class AmazonScraper extends BaseScraper
 
         // Original price (MRP or regular price)
         $mrpPriceSelectors = [
-            ".a-price.a-text-price .a-offscreen", // Strikethrough price
-            "#priceblock_listprice",
-            ".a-text-strike"
+            "#centerCol  .a-price.a-text-price .a-offscreen", // Strikethrough price
+            "#centerCol  #priceblock_listprice",
+            "#centerCol  .a-text-strike"
         ];
 
         foreach ($mrpPriceSelectors as $selector) {
