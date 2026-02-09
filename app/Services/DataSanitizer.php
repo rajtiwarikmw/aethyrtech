@@ -25,6 +25,7 @@ class DataSanitizer
         $sanitized['brand'] = self::sanitizeString($data['brand'] ?? null);
         $sanitized['model_name'] = self::sanitizeString($data['model_name'] ?? null);
         $sanitized['color'] = self::sanitizeString($data['color'] ?? null);
+        $sanitized['variants'] = self::sanitizeString($data['variants'] ?? null);
         $sanitized['weight'] = self::sanitizeString($data['weight'] ?? null);
         $sanitized['dimensions'] = self::sanitizeString($data['dimensions'] ?? null);
         $sanitized['product_url'] = self::sanitizeUrl($data['product_url'] ?? null);

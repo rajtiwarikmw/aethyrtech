@@ -60,7 +60,8 @@ class AmazonRankingScraper
 
         // Get keywords to process
         $query = Keyword::where('platform', $this->platform)
-            ->where('status', true);
+            ->where('status', true)
+            ->where('category', 'Mobile');
 
         if ($keywordIds) {
             $query->whereIn('id', $keywordIds);
@@ -76,7 +77,7 @@ class AmazonRankingScraper
                 $this->stats['keywords_processed']++;
 
                 // Add delay between keywords
-                $this->randomDelay(3, 6);
+                $this->randomDelay(8, 15);
             } catch (\Exception $e) {
                 Log::error("Failed to scrape rankings for keyword", [
                     'keyword_id' => $keyword->id,
@@ -154,7 +155,7 @@ class AmazonRankingScraper
                 ]);
 
                 // Add delay between pages
-                $this->randomDelay(2, 4);
+                $this->randomDelay(8, 15);
             } catch (\Exception $e) {
                 Log::error("Error scraping search results page", [
                     'keyword' => $keyword->keyword,
@@ -382,7 +383,7 @@ class AmazonRankingScraper
     /**
      * Random delay to avoid rate limiting
      */
-    protected function randomDelay(int $min = 2, int $max = 5): void
+    protected function randomDelay(int $min = 5, int $max = 15): void
     {
         $delay = rand($min * 1000000, $max * 1000000);
         usleep($delay);

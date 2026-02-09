@@ -28,6 +28,7 @@ class Product extends Model
         'model_name',
         'highlights',
         'color',
+        'variants',
         'image_urls',
         'video_urls',
         'product_url',

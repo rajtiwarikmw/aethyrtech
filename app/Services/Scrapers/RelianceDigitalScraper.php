@@ -153,7 +153,7 @@ class RelianceDigitalScraper extends BaseScraper
             }
 
             $productUrls = array_unique($productUrls);
-            $productUrls = array_slice($productUrls, 0, 50);
+            $productUrls = array_slice($productUrls, 0, 500);
 
             Log::info("Extracted Reliance Digital product URLs", [
                 'count' => count($productUrls),

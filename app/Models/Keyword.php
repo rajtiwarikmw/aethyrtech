@@ -13,6 +13,7 @@ class Keyword extends Model
     protected $fillable = [
         'platform',
         'keyword',
+        'category',
         'status',
     ];
 

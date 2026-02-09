@@ -17,8 +17,10 @@ class FlipkartScraper extends BaseScraper
             'max_pages' => 100,
             'page_param' => 'page',
             'has_next_selector' => '._1LKTO3:last-child:not(._34Gtpf)',
-            'delay_between_pages' => [5, 12], // Increased delays to avoid detection
-            'max_consecutive_errors' => 2, // Reduced to trigger browser fallback faster
+            'max_consecutive_errors' => 500, // Allow more errors before stopping
+            'delay_between_pages' => [3, 7], // Longer delays to avoid rate limiting
+            'retry_failed_pages' => true,
+            'max_retries_per_page' => 3
         ];
 
         // Will be set dynamically using UserAgentRotator
@@ -156,7 +158,7 @@ class FlipkartScraper extends BaseScraper
                         if (strpos($href, 'http') !== 0) {
                             $href = 'https://www.flipkart.com' . $href;
                         }
-                        $href = explode('?', $href)[0];
+                        //$href = explode('?', $href)[0];
                         // Only include Product product pages
                         if (strpos($href, '/p/') !== false) {
                             $productUrls[] = $href;
@@ -198,7 +200,7 @@ class FlipkartScraper extends BaseScraper
                 return [];
             }
 
-            $data['product_url'] = $productUrl;
+            $data['product_url'] = $productUrl = explode('?', $productUrl)[0];
 
             // Product name
             $data['title'] = $this->extractProductName($crawler);
@@ -278,7 +280,7 @@ class FlipkartScraper extends BaseScraper
     private function extractSkuFromUrl(string $url): ?string
     {
         // Flipkart product ID pattern
-        if (preg_match('/\/p\/([a-zA-Z0-9]+)/', $url, $matches)) {
+        if (preg_match('#/p/(itm[a-zA-Z0-9]+)#', $url, $matches)) {
             return $matches[1];
         }
 
@@ -639,30 +641,27 @@ class FlipkartScraper extends BaseScraper
     {
         $variants = [];
 
-        // Flipkart color variants (each li > a)
+        // All variant links (color / storage / ram)
         $crawler->filter('div.IcJh2W ul.UqCsru li a')->each(function (Crawler $node) use (&$variants) {
-            $href = $node->attr('href') ?: '';
 
-            if (empty($href)) {
+            $href = $node->attr('href');
+            if (!$href) {
                 return;
             }
 
-            // Match SKU from /p/{sku}
-            if (preg_match('#/p/([^/?#]+)#', $href, $m)) {
-                $variants[] = $m[1];
-            }
-            // Or fallback to pid= if structure is different
-            elseif (preg_match('/[?&]pid=([^&]+)/', $href, $m2)) {
-                $variants[] = $m2[1];
+            // Extract Flipkart SKU from /p/itmXXXX
+            if (preg_match('#/p/(itm[a-zA-Z0-9]+)#', $href, $match)) {
+                $variants[] = $match[1];
             }
         });
 
-        // Remove duplicates and empty values
-        $variants = array_filter(array_unique($variants));
+        // Remove duplicates
+        $variants = array_values(array_unique($variants));
 
-        // Return comma-separated SKUs or null
-        return !empty($variants) ? implode(',', $variants) : null;
+        // Return comma-separated SKUs
+        return $variants ? implode(',', $variants) : null;
     }
+
 
     // Product Attributes
     private function extractBrand(Crawler $crawler): ?string
@@ -680,7 +679,7 @@ class FlipkartScraper extends BaseScraper
 
             // Check first cell for "Brand"
             $label = strtolower(trim($cells->eq(0)->text()));
-            if (strpos($label, 'brand') !== false) {
+            if ($label === 'brand') {
 
                 // New format → <ul><li class="DW2bnL">HP</li></ul>
                 $brandNode = $cells->eq(1)->filter('li')->first();
@@ -724,53 +723,44 @@ class FlipkartScraper extends BaseScraper
 
     private function extractColour(Crawler $crawler): ?string
     {
-        $colourList = [];
-        $colour = null;
-
         try {
-            
-            $crawler->filter('div.IcJh2W ul.UqCsru li div.wpbaaT')->each(function (Crawler $node) use (&$colourList) {
-                $text = trim($node->text());
-                if (!empty($text)) {
-                    $colourList[] = $text;
-                }
-            });
 
-            $crawler->filter('div.WGBwfw ul.hSEbzK li .V3Zflw')->each(function (Crawler $node) use (&$colourList) {
-                $text = trim($node->text());
-                if (!empty($text)) {
-                    $colourList[] = $text;
-                }
-            });
-            if (!empty($colourList)) {
-                $colour = implode(', ', array_unique($colourList));
+            // First try color swatches (take FIRST only)
+            $node = $crawler->filter('div.IcJh2W ul.UqCsru li div.wpbaaT')->first();
+            if ($node->count()) {
+                return $this->cleanText($node->text());
             }
 
-            if (!$colour) {
-                $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$colour) {
-                    $cells = $row->filter('td');
-                    if ($cells->count() >= 2) {
-                        $label = strtolower(trim($cells->eq(0)->text()));
-                        if (strpos($label, 'color') !== false || strpos($label, 'colour') !== false) {
+            // Alternative layout
+            $node = $crawler->filter('div.WGBwfw ul.hSEbzK li .V3Zflw')->first();
+            if ($node->count()) {
+                return $this->cleanText($node->text());
+            }
 
-                            // If inside <ul><li>
-                            $liNode = $cells->eq(1)->filter('li')->first();
-                            if ($liNode->count() > 0) {
-                                $colour = trim($liNode->text());
-                            } else {
-                                $colour = trim($cells->eq(1)->text());
-                            }
-                        }
+            // Fallback: specification table
+            $colour = null;
+            $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$colour) {
+                $cells = $row->filter('td');
+                if ($cells->count() >= 2) {
+                    $label = strtolower(trim($cells->eq(0)->text()));
+                    if (str_contains($label, 'color') || str_contains($label, 'colour')) {
+
+                        $liNode = $cells->eq(1)->filter('li')->first();
+                        $colour = $liNode->count()
+                            ? trim($liNode->text())
+                            : trim($cells->eq(1)->text());
                     }
-                });
-            }
+                }
+            });
+
+            return $colour ? $this->cleanText($colour) : null;
 
         } catch (\Exception $e) {
             Log::warning('Colour extraction failed', ['error' => $e->getMessage()]);
+            return null;
         }
-
-        return $colour ? $this->cleanText($colour) : null;
     }
+
 
 
 

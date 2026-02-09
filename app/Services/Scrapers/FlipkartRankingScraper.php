@@ -43,7 +43,9 @@ class FlipkartRankingScraper
 
     public function scrapeRankings(?array $keywordIds = null): array
     {
-        $query = Keyword::where('platform', $this->platform)->where('status', true);
+        $query = Keyword::where('platform', $this->platform)
+                ->where('status', true)
+                ->where('category', 'Mobile');
         if ($keywordIds) {
             $query->whereIn('id', $keywordIds);
         }

@@ -14,7 +14,7 @@ class VijaySalesScraper extends BaseScraper
         $this->useJavaScript = false; // VijaySales works with regular HTTP requests
         $this->paginationConfig = [
             'type' => 'regular',
-            'max_pages' => 3,
+            'max_pages' => 1,
             'page_param' => 'p',
             'has_next_selector' => '.pages .next',
         ];
@@ -35,22 +35,10 @@ class VijaySalesScraper extends BaseScraper
         try {
             // Updated VijaySales product links patterns
             $selectors = [
-                '.product-item-link',
-                '.product-name a',
-                '.item-title a',
-                '.product-title a',
-                '.product-item .product-item-photo a',
-                '.product-item-info a',
-                '.product-item-details a',
-                '.item-info a',
-                '.product-card a',
-                '.product-wrapper a',
-                'a[href*="/product/"]',
-                'a[href*="/p/"]',
-                '.item a',
-                '.product a',
-                '.listing-item a',
-                '.grid-item a'
+                'a.product-card__link',
+                '.product-card__link',   
+                'a[href^="/p/"]',
+                'a[data-href*="/p/"]',
             ];
 
             foreach ($selectors as $selector) {
@@ -114,7 +102,8 @@ class VijaySalesScraper extends BaseScraper
             $data = [];
 
             // Extract SKU from URL or page
-            $data['sku'] = $this->extractSkuFromUrl($productUrl) ?: $this->extractSkuFromPage($crawler);
+            //$data['sku'] = $this->extractSkuFromUrl($productUrl) ?: $this->extractSkuFromPage($crawler);
+            $data['sku'] = $this->extractSkuFromUrl($productUrl);
             if (!$data['sku']) {
                 Log::warning("Could not extract SKU from VijaySales URL: {$productUrl}");
                 return [];
@@ -175,13 +164,19 @@ class VijaySalesScraper extends BaseScraper
 
     private function extractSkuFromUrl(string $url): ?string
     {
-        // Match /p/{sku}/
-        if (preg_match('#/p/(\d+)/#', $url, $matches)) {
+        // Case 1: parent + child
+        if (preg_match('#/p/([A-Z0-9]+)/(\d+)#i', $url, $matches)) {
+            return strtoupper($matches[1]) . '-' . $matches[2];
+        }
+
+        // Case 2: only child
+        if (preg_match('#/p/(\d+)#', $url, $matches)) {
             return $matches[1];
         }
 
         return null;
     }
+
 
     private function extractSkuFromPage(Crawler $crawler): ?string
     {

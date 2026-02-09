@@ -39,9 +39,9 @@ class AmazonScraper extends BaseScraper
         try {
             // Amazon product links patterns
             $selectors = [
-                '#centerCol #productTitle',
-                '#centerCol #title span',
-                '#centerCol h1#title span',
+                'div[data-cy="title-recipe"] > a',
+                'a.a-link-normal.s-no-outline',
+                'div[data-cy="title-recipe"] > a.a-link-normal',
             ];
 
             foreach ($selectors as $selector) {
