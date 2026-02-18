@@ -9,6 +9,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\DomCrawler\Crawler;
+use GuzzleHttp\Cookie\CookieJar;
 
 abstract class BaseScraper
 {
@@ -80,8 +81,9 @@ abstract class BaseScraper
             'headers' => [
                 'User-Agent' => config('scraper.user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'),
                 'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language' => 'en-US,en;q=0.5',
-                'Accept-Encoding' => 'gzip, deflate',
+                'Accept-Language' => 'en-US,en;q=0.9',
+                'Cache-Control' => 'max-age=0',
+                'Upgrade-Insecure-Requests' => '1',
                 'Connection' => 'keep-alive',
                 'Upgrade-Insecure-Requests' => '1',
             ],

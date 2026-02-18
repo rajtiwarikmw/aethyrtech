@@ -13,7 +13,7 @@ return [
     'delay_min' => env('SCRAPER_DELAY_MIN', 2),
     'delay_max' => env('SCRAPER_DELAY_MAX', 7),
 
-    'user_agent' => env('SCRAPER_USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'),
+    'user_agent' => env('SCRAPER_USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36'),
 
     /*
     |--------------------------------------------------------------------------
@@ -40,7 +40,7 @@ return [
             'base_url' => 'https://www.flipkart.com',
             'category_urls' => [
                 //'https://www.flipkart.com/computers/computer-peripherals/printers-inks/printers/pr?sid=6bo,tia,ffn,t64&q=printer&otracker=categorytree',
-                'https://www.flipkart.com/mobiles-accessories/mobiles/pr?sid=tyy%2C4io&otracker=categorytree&p%5B%5D=facets.brand%255B%255D%3DMOTOROLA&p%5B%5D=facets.brand%255B%255D%3DSamsung&p%5B%5D=facets.brand%255B%255D%3Drealme&p%5B%5D=facets.brand%255B%255D%3DOPPO&p%5B%5D=facets.brand%255B%255D%3DLAVA&p%5B%5D=facets.brand%255B%255D%3Dvivo&p%5B%5D=facets.brand%255B%255D%3DMi',
+                'https://www.flipkart.com/mobiles/pr?sid=tyy%2C4io&q=mobile&p%5B%5D=facets.brand%255B%255D%3DMOTOROLA&otracker=categorytree&p%5B%5D=facets.brand%255B%255D%3Dvivo&p%5B%5D=facets.brand%255B%255D%3DOPPO&p%5B%5D=facets.brand%255B%255D%3Drealme&p%5B%5D=facets.brand%255B%255D%3DSamsung&p%5B%5D=facets.brand%255B%255D%3DLAVA&p%5B%5D=facets.brand%255B%255D%3DMi',
             ]
         ],
         'vijaysales' => [
@@ -87,8 +87,8 @@ return [
                 // 'https://www.reliancedigital.in/collection/brother-printers',
                 // 'https://www.reliancedigital.in/collection/epson-printers',
                 //mobile
-                //'https://www.reliancedigital.in/collection/samsung-mobiles?is_available=true&sort_on=latest&page_no=1&page_size=480&page_type=number',
-                //'https://www.reliancedigital.in/collection/oppo-mobiles?is_available=true&sort_on=latest&page_no=1&page_size=240&page_type=number',
+                'https://www.reliancedigital.in/collection/samsung-mobiles?is_available=true&sort_on=latest&page_no=1&page_size=480&page_type=number',
+                'https://www.reliancedigital.in/collection/oppo-mobiles?is_available=true&sort_on=latest&page_no=1&page_size=240&page_type=number',
                 'https://www.reliancedigital.in/collection/realme-mobiles?is_available=true&sort_on=latest&page_no=1&page_size=240&page_type=number',
                 'https://www.reliancedigital.in/collection/redmi-mobiles?is_available=true&sort_on=latest&page_no=1&page_size=240&page_type=number',
                 'https://www.reliancedigital.in/collection/vivo-mobiles?is_available=true&sort_on=latest&page_no=1&page_size=240&page_type=number',
