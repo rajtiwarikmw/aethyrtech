@@ -35,41 +35,38 @@ class FlipkartScraper extends BaseScraper
     /**
      * Override scrape method to implement browser fallback for 403 errors
      */
-    // public function scrape(array $categoryUrls): array
-    // {
-    //     $this->stats = [
-    //         'products_found' => 0,
-    //         'products_updated' => 0,
-    //         'products_added' => 0,
-    //         'products_deactivated' => 0,
-    //         'errors_count' => 0
-    //     ];
+    public function scrape(array $categoryUrls): void
+    {
+        $this->scrapingLog = \App\Models\ScrapingLog::startSession($this->platform);
 
-    //     Log::info("Starting Flipkart scraping with HTTP requests", [
-    //         'platform' => $this->platform,
-    //         'categories' => count($categoryUrls)
-    //     ]);
+        try {
+            Log::info("Starting Flipkart scraping with HTTP requests", [
+                'platform' => $this->platform,
+                'categories' => count($categoryUrls)
+            ]);
 
-    //     $httpSuccess = false;
+            foreach ($categoryUrls as $categoryUrl) {
+                // Try HTTP first
+                if ($this->tryHttpScraping($categoryUrl)) {
+                    // Success
+                } else {
+                    // If HTTP fails, switch to browser automation
+                    Log::warning("HTTP scraping failed for Flipkart, switching to browser automation");
+                    $this->useJavaScript = true;
+                    $this->scrapeCategoryWithBrowser($categoryUrl);
+                }
 
-    //     foreach ($categoryUrls as $categoryUrl) {
-    //         // Try HTTP first
-    //         if ($this->tryHttpScraping($categoryUrl)) {
-    //             $httpSuccess = true;
-    //         } else {
-    //             // If HTTP fails, switch to browser automation
-    //             Log::warning("HTTP scraping failed for Flipkart, switching to browser automation");
-    //             $this->useJavaScript = true;
-    //             $this->scrapeCategoryWithBrowser($categoryUrl);
-    //         }
+                if ($this->isExecutionTimeLimitReached()) {
+                    break;
+                }
+            }
 
-    //         if ($this->isExecutionTimeLimitReached()) {
-    //             break;
-    //         }
-    //     }
-
-    //     return $this->stats;
-    // }
+            $this->scrapingLog->complete($this->stats);
+        } catch (\Exception $e) {
+            $this->handleError("Scraping failed for Flipkart", $e);
+            $this->scrapingLog->fail($e->getMessage(), [], $this->stats);
+        }
+    }
 
     /**
      * Try HTTP scraping with enhanced anti-blocking measures
@@ -436,45 +433,9 @@ class FlipkartScraper extends BaseScraper
 
 
      
-    private function extractCurrencyCode(Crawler $crawler): ?string
+    private function extractCurrencyCode(Crawler $crawler): string
     {
-        // Possible currency symbol nodes (Amazon + Flipkart + fallback)
-        $selectors = [
-            '.Nx9bqj.CxhGGd',
-            '.yRaY8j.A6+E6v'
-        ];
-
-        $symbol = null;
-
-        foreach ($selectors as $selector) {
-            $node = $crawler->filter($selector)->first();
-            if ($node->count() > 0) {
-                // Flipkart prices include ₹ in the text, so extract first char
-                $text = trim($node->text());
-                $symbol = mb_substr($text, 0, 1); 
-                break;
-            }
-        }
-
-        if (!$symbol) {
-            return null;
-        }
-
-        // Map symbols to ISO currency codes
-        $currencyMap = [
-            '₹' => 'INR',
-            '$' => 'USD',
-            '£' => 'GBP',
-            '€' => 'EUR',
-            '¥' => 'JPY',
-            '₩' => 'KRW',
-            '₽' => 'RUB',
-            '₫' => 'VND',
-            '฿' => 'THB',
-            '₦' => 'NGN',
-        ];
-
-        return $currencyMap[$symbol] ?? $symbol; // fallback to raw symbol
+        return 'INR';
     }
 
 
@@ -1022,17 +983,18 @@ class FlipkartScraper extends BaseScraper
         * ✅ NEW Flipkart Highlights (grid cards under "Product highlights")
         * Target only text blocks inside the highlights section
         */
-        $crawler->filter('div:contains("Product highlights")')
-            ->parents()
-            ->nextAll()
-            ->first()
-            ->filter('div.v1zwn21j.v1zwn25')
-            ->each(function (Crawler $node) use (&$highlights) {
-                $text = trim($node->text());
-                if ($text !== '') {
-                    $highlights[] = $text;
-                }
-            });
+        $crawler->filter('div:contains("Product highlights")')->each(function (Crawler $node) use (&$highlights) {
+            // Use filter to find the next sibling container that holds the highlights
+            $container = $node->closest('div')->nextAll()->first();
+            if ($container->count() > 0) {
+                $container->filter('div.v1zwn21j.v1zwn25')->each(function (Crawler $item) use (&$highlights) {
+                    $text = trim($item->text());
+                    if ($text !== '') {
+                        $highlights[] = $text;
+                    }
+                });
+            }
+        });
 
         /*
         * ✅ Previous Flipkart structure
@@ -1058,15 +1020,17 @@ class FlipkartScraper extends BaseScraper
             });
         }
 
-        return !empty($highlights) ? implode('. ', $highlights) : null;
+        return !empty($highlights) ? implode(' | ', $highlights) : null;
     }
 
 
 
-    private function extractSpecValue(Crawler $crawler, string $targetLabel): ?string
+
+
+    private function extractTechnicalDetails(Crawler $crawler): ?string
     {
         $value = null;
-
+        $targetLabel =null;
         $crawler->filter('div.grid-formation-dynamic')->each(function (Crawler $block) use (&$value, $targetLabel) {
 
             $labelNode = $block->filter('div.v1zwn21k')->first();
@@ -1159,13 +1123,6 @@ class FlipkartScraper extends BaseScraper
 
         return $ratings;
     }
-
-
-
-
-    
-
-
-    
+   
 
 }

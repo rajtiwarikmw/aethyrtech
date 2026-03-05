@@ -61,7 +61,7 @@ class AmazonRankingScraper
         // Get keywords to process
         $query = Keyword::where('platform', $this->platform)
             ->where('status', true)
-            ->where('category', 'Mobile');
+            ->where('category', 'printer');
 
         if ($keywordIds) {
             $query->whereIn('id', $keywordIds);

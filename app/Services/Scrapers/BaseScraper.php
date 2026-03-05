@@ -399,9 +399,13 @@ abstract class BaseScraper
      */
     protected function fetchPage(string $url, int $retries = 3): ?string
     {
+        $cookieJar = new \GuzzleHttp\Cookie\CookieJar();
+
         for ($attempt = 1; $attempt <= $retries; $attempt++) {
             try {
-                $options = [];
+                $options = [
+                    'cookies' => $cookieJar,
+                ];
 
                 // Add platform-specific headers if available, otherwise use randomized headers
                 if (!empty($this->defaultHeaders)) {

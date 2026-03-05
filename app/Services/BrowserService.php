@@ -17,16 +17,16 @@ class BrowserService
             'userAgent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'windowSize' => [1920, 1080],
             'args' => [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding',
-                '--blink-settings=imagesEnabled=false'
+                'no-sandbox',
+                'disable-setuid-sandbox',
+                'disable-dev-shm-usage',
+                'disable-gpu',
+                'disable-web-security',
+                'disable-features=VizDisplayCompositor',
+                'disable-background-timer-throttling',
+                'disable-backgrounding-occluded-windows',
+                'disable-renderer-backgrounding',
+                'blink-settings=imagesEnabled=false'
             ]
         ];
     }
@@ -46,7 +46,7 @@ class BrowserService
                 $timeout = $attempts === 0 ? $this->defaultOptions['timeout'] : ($this->defaultOptions['timeout'] * 2);
                 
                 $browsershot = Browsershot::url($url)
-                               ->setChromePath('C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe')
+                               // ->setChromePath('/usr/bin/chromium-browser')
                                 ->timeout($timeout)
                                 ->userAgent($this->defaultOptions['userAgent'])
                                 ->windowSize(
