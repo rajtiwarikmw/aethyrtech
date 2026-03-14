@@ -11,19 +11,18 @@ class FlipkartScraper extends BaseScraper
     protected function setupPlatformConfig(): void
     {
         $this->platform = 'flipkart';
-        $this->useJavaScript = false; // Start with HTTP, fallback to browser
+        $this->useJavaScript = true; // Use Browsershot as primary mechanism
         $this->paginationConfig = [
             'type' => 'regular',
             'max_pages' => 100,
             'page_param' => 'page',
             'has_next_selector' => '._1LKTO3:last-child:not(._34Gtpf)',
-            'max_consecutive_errors' => 500, // Allow more errors before stopping
-            'delay_between_pages' => [3, 7], // Longer delays to avoid rate limiting
+            'max_consecutive_errors' => 500,
+            'delay_between_pages' => [4, 8], // Increased delays to avoid rate limiting
             'retry_failed_pages' => true,
             'max_retries_per_page' => 3
         ];
 
-        // Will be set dynamically using UserAgentRotator
         $this->defaultHeaders = [];
     }
 
@@ -33,28 +32,22 @@ class FlipkartScraper extends BaseScraper
     }
 
     /**
-     * Override scrape method to implement browser fallback for 403 errors
+     * Override scrape method to use Browsershot as primary mechanism
+     * Flipkart has aggressive anti-scraping measures, so we use a real browser
      */
     public function scrape(array $categoryUrls): void
     {
         $this->scrapingLog = \App\Models\ScrapingLog::startSession($this->platform);
 
         try {
-            Log::info("Starting Flipkart scraping with HTTP requests", [
+            Log::info("Starting Flipkart scraping with Browsershot", [
                 'platform' => $this->platform,
                 'categories' => count($categoryUrls)
             ]);
 
             foreach ($categoryUrls as $categoryUrl) {
-                // Try HTTP first
-                if ($this->tryHttpScraping($categoryUrl)) {
-                    // Success
-                } else {
-                    // If HTTP fails, switch to browser automation
-                    Log::warning("HTTP scraping failed for Flipkart, switching to browser automation");
-                    $this->useJavaScript = true;
-                    $this->scrapeCategoryWithBrowser($categoryUrl);
-                }
+                // Use Browsershot directly as primary mechanism
+                $this->scrapeCategoryWithBrowser($categoryUrl);
 
                 if ($this->isExecutionTimeLimitReached()) {
                     break;
@@ -66,6 +59,17 @@ class FlipkartScraper extends BaseScraper
             $this->handleError("Scraping failed for Flipkart", $e);
             $this->scrapingLog->fail($e->getMessage(), [], $this->stats);
         }
+    }
+
+    /**
+     * Override randomDelay with longer delays for Flipkart
+     * Flipkart has aggressive rate limiting, so we use longer delays
+     */
+    protected function randomDelay(): void
+    {
+        $delay = rand(5, 10);
+        Log::debug("Random delay applied for Flipkart", ['delay_seconds' => $delay]);
+        sleep($delay);
     }
 
     /**
@@ -393,6 +397,8 @@ class FlipkartScraper extends BaseScraper
             '[class*="v1zwn21j"][class*="v1zwn20"]',
             ".Nx9bqj.CxhGGd",
             ".hZ3P6w.bnqy13",
+            'div[class*="v1zwn21j"][class*="v1zwn20"]',
+            'span[class*="Nx9bqj"]',
         ];
 
         foreach ($salePriceSelectors as $selector) {
@@ -413,6 +419,8 @@ class FlipkartScraper extends BaseScraper
              '[class*="v1zwn21k"][style*="line-through"]',
             ".hl05eU .yRaY8j",
             ".kRYCnD.yHYOcc",
+            'div[style*="line-through"]',
+            'span[style*="line-through"]',
         ];
             
         foreach ($mrpPriceSelectors as $selector) {
@@ -421,7 +429,7 @@ class FlipkartScraper extends BaseScraper
                 $priceText = $this->cleanText($element->text());
                 $price = $this->extractPrice($priceText);
                 if ($price) {
-                    $prices["price"] = $price;       // This is the regular price
+                    $prices["price"] = $price;
                     break;
                 }
             }
@@ -516,12 +524,16 @@ class FlipkartScraper extends BaseScraper
 
         $ratingSelectors = [
             '.asbjxx.A02XR3.lV7ANv.Yd5OMU .css-1rynq56',
+            'div[class*="rating"] span',
+            'span[class*="rating"]',
+            '.v1zwn21j.v1zwn20',
         ];
 
         foreach ($ratingSelectors as $selector) {
             $element = $crawler->filter($selector)->first();
             if ($element->count() > 0) {
-                $rating = $this->extractRating($element->text());
+                $text = trim($element->text());
+                $rating = $this->extractRating($text);
                 if ($rating) {
                     $data['rating'] = $rating;
                     break;
@@ -530,7 +542,10 @@ class FlipkartScraper extends BaseScraper
         }
 
         $reviewSelectors = [
-            'a[href*="ratings-reviews"] .css-1rynq56'
+            'a[href*="ratings-reviews"] .css-1rynq56',
+            'a[href*="ratings-reviews"]',
+            'span[class*="review"]',
+            'div[class*="review"] span'
         ];
 
         foreach ($reviewSelectors as $selector) {
@@ -541,6 +556,8 @@ class FlipkartScraper extends BaseScraper
                 // Flipkart format: "278 Ratings & 23 Reviews"
                 if (preg_match('/(\d+)\s+Ratings.*?(\d+)\s+Reviews/', $text, $matches)) {
                     $data['review_count'] = (int)$matches[2];
+                } elseif (preg_match('/(\d+)\s+Reviews?/', $text, $matches)) {
+                    $data['review_count'] = (int)$matches[1];
                 } else {
                     $reviewCount = $this->extractReviewCount($text);
                     if ($reviewCount > 0) {
@@ -548,7 +565,9 @@ class FlipkartScraper extends BaseScraper
                     }
                 }
 
-                break;
+                if ($data['review_count'] > 0) {
+                    break;
+                }
             }
         }
 
@@ -596,12 +615,33 @@ class FlipkartScraper extends BaseScraper
     {
         $images = [];
 
+        // Primary selector for Flipkart images
         $crawler->filter('ul.f67RGv li img.EIfF82')->each(function (Crawler $node) use (&$images) {
             $src = $node->attr('src');
             if ($src && strpos($src, 'http') === 0) {
                 $images[] = $src;
             }
         });
+
+        // Fallback: Try other image containers
+        if (empty($images)) {
+            $crawler->filter('img[alt*="product"], img[alt*="Product"], div.slick-slide img')->each(function (Crawler $node) use (&$images) {
+                $src = $node->attr('src');
+                if ($src && strpos($src, 'http') === 0 && strpos($src, 'flipkart') !== false) {
+                    $images[] = $src;
+                }
+            });
+        }
+
+        // Fallback: Try data-src attribute for lazy-loaded images
+        if (empty($images)) {
+            $crawler->filter('img[data-src]')->each(function (Crawler $node) use (&$images) {
+                $src = $node->attr('data-src');
+                if ($src && strpos($src, 'http') === 0) {
+                    $images[] = $src;
+                }
+            });
+        }
 
         return !empty($images) ? array_values(array_unique($images)) : null;
     }
@@ -657,6 +697,20 @@ class FlipkartScraper extends BaseScraper
                 $brand = trim($valueNode->text());
             }
         });
+
+        // Fallback: Try from specifications table
+        if (!$brand) {
+            $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$brand) {
+                if ($brand !== null) return;
+                $cells = $row->filter('td');
+                if ($cells->count() >= 2) {
+                    $label = strtolower(trim($cells->eq(0)->text()));
+                    if (strpos($label, 'brand') !== false) {
+                        $brand = trim($cells->eq(1)->text());
+                    }
+                }
+            });
+        }
 
         return $brand;
     }
@@ -723,6 +777,20 @@ class FlipkartScraper extends BaseScraper
                 }
             }
         });
+
+        // Fallback: Try from specifications table
+        if (!$colour) {
+            $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$colour) {
+                if ($colour !== null) return;
+                $cells = $row->filter('td');
+                if ($cells->count() >= 2) {
+                    $label = strtolower(trim($cells->eq(0)->text()));
+                    if (strpos($label, 'color') !== false || strpos($label, 'colour') !== false) {
+                        $colour = trim($cells->eq(1)->text());
+                    }
+                }
+            });
+        }
 
         return $colour;
     }
@@ -1029,23 +1097,37 @@ class FlipkartScraper extends BaseScraper
 
     private function extractTechnicalDetails(Crawler $crawler): ?string
     {
-        $value = null;
-        $targetLabel =null;
-        $crawler->filter('div.grid-formation-dynamic')->each(function (Crawler $block) use (&$value, $targetLabel) {
+        $details = [];
 
+        // Extract all specifications from grid formation
+        $crawler->filter('div.grid-formation-dynamic')->each(function (Crawler $block) use (&$details) {
             $labelNode = $block->filter('div.v1zwn21k')->first();
-            $valueNode = $block->filter('div.v1zwn21j.v1zwn26')->first();
+            $valueNode = $block->filter('div.v1zwn21j')->first();
 
             if ($labelNode->count() && $valueNode->count()) {
-                $label = strtolower(trim($labelNode->text()));
-
-                if (strpos($label, strtolower($targetLabel)) !== false) {
-                    $value = trim($valueNode->text());
+                $label = trim($labelNode->text());
+                $value = trim($valueNode->text());
+                if ($label && $value) {
+                    $details[] = $label . ': ' . $value;
                 }
             }
         });
 
-        return $value;
+        // Fallback: Extract from specifications table
+        if (empty($details)) {
+            $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$details) {
+                $cells = $row->filter('td');
+                if ($cells->count() >= 2) {
+                    $label = trim($cells->eq(0)->text());
+                    $value = trim($cells->eq(1)->text());
+                    if ($label && $value) {
+                        $details[] = $label . ': ' . $value;
+                    }
+                }
+            });
+        }
+
+        return !empty($details) ? implode(' | ', $details) : null;
     }
 
 

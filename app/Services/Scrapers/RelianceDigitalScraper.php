@@ -18,7 +18,7 @@ class RelianceDigitalScraper extends BaseScraper
             'max_pages' => 3,
             'page_param' => 'page_no',
             'has_next_selector' => '.pagination span[aria-label="Goto Next Page"]',
-            'delay_between_pages' => [1, 2], // OPTIMIZED: Reduced delays
+            'delay_between_pages' => [3, 6], // Increased delays to avoid rate limiting
             'retry_failed_pages' => true,
             'max_retries_per_page' => 2 // OPTIMIZED: Reduced retries
         ];
@@ -29,78 +29,97 @@ class RelianceDigitalScraper extends BaseScraper
         parent::__construct('reliancedigital');
     }
 
-    protected function fetchPageWithBrowsershot(string $url): ?string
+    /**
+     * Override scrapeProductPage with Guzzle-first fallback strategy
+     * Try lightweight Guzzle HTTP first, then fall back to Browsershot if needed
+     * This approach is faster and less likely to be detected as a bot
+     */
+    protected function scrapeProductPage(string $productUrl): void
     {
         try {
-            Log::debug("Fetching Reliance Digital page with JavaScript", ['url' => $url]);
+            // Strategy: Try Guzzle first (lightweight), then fallback to Browsershot
+            $html = $this->fetchProductPageWithFallback($productUrl);
 
-            // Determine if this is a product page or category page
-            $isProductPage = strpos($url, '/product/') !== false;
-            
-            $timeout = $isProductPage ? 45 : 30;
-            
-            $browsershot = Browsershot::url($url)
-                ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-                ->setExtraHttpHeaders([
-                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language' => 'en-US,en;q=0.9',
-                    'Accept-Encoding' => 'gzip, deflate, br',
-                    'Connection' => 'keep-alive',
-                    'Upgrade-Insecure-Requests' => '1',
-                    'Sec-Fetch-Dest' => 'document',
-                    'Sec-Fetch-Mode' => 'navigate',
-                    'Sec-Fetch-Site' => 'none',
-                ])
-                ->timeout($timeout);
-            
-            $browsershot->waitForFunction(
-                '() => document.readyState === "complete"',
-                ['polling' => 500, 'timeout' => $timeout * 1000]
-            );
-            
-            $html = $browsershot->bodyHtml();
-
-            $contentLength = strlen($html);
-
-            Log::debug("Reliance Digital page response", [
-                'status_code' => 200,
-                'content_length' => $contentLength,
-                'is_product_page' => $isProductPage,
-                'timeout_used' => $timeout
-            ]);
-
-            if ($contentLength < 1000) {
-                Log::warning("Reliance Digital returned suspiciously small response", [
-                    'content_length' => $contentLength,
-                    'url' => $url
+            if (!$html) {
+                Log::warning("Failed to fetch product page after all attempts", [
+                    'platform' => $this->platform,
+                    'url' => $productUrl
                 ]);
-                return null;
+                return;
             }
 
-            // Check for error pages
-            if (strpos($html, 'page was not found') !== false ||
-                strpos($html, 'Oops!') !== false ||
-                strpos($html, 'Access Denied') !== false) {
-                Log::warning("Reliance Digital returned error page", ['url' => $url]);
-                
-                // Save HTML for debugging
-                $debugFile = storage_path('logs/reliancedigital_debug_' . time() . '.html');
-                file_put_contents($debugFile, $html);
-                Log::debug("Saved HTML for debugging", ['file' => $debugFile]);
-                
-                return null;
+            $crawler = new Crawler($html);
+            $productData = $this->extractProductData($crawler, $productUrl);
+
+            if (!$productData || !isset($productData['sku'])) {
+                Log::warning("No valid product data found", [
+                    'platform' => $this->platform,
+                    'url' => $productUrl
+                ]);
+                return;
             }
 
-            return $html;
-
+            $this->saveProductData($productData);
+            $this->stats['products_found']++;
         } catch (\Exception $e) {
-            Log::error("Failed to fetch Reliance Digital page", [
-                'url' => $url,
-                'error' => $e->getMessage(),
-                'error_code' => $e->getCode()
-            ]);
-            return null;
+            $this->handleError("Failed to scrape product page: {$productUrl}", $e);
         }
+    }
+
+    /**
+     * Override randomDelay with longer delays for Reliance Digital
+     * Longer delays help avoid rate limiting and IP blocking
+     */
+    protected function randomDelay(): void
+    {
+        // Use longer delays for Reliance Digital to avoid rate limiting
+        $delay = rand(4, 8);
+        Log::debug("Random delay applied", ['delay_seconds' => $delay, 'platform' => $this->platform]);
+        sleep($delay);
+    }
+
+    /**
+     * Fetch product page with Guzzle-first fallback to Browsershot
+     * This method tries the lightweight Guzzle HTTP client first,
+     * then falls back to Browsershot if Guzzle fails or returns insufficient content
+     */
+    private function fetchProductPageWithFallback(string $productUrl): ?string
+    {
+        // Step 1: Try Guzzle HTTP first (lightweight, faster, less detectable)
+        Log::info("Attempting to fetch with Guzzle HTTP", ['url' => $productUrl]);
+        $html = $this->fetchPage($productUrl, 2);
+
+        if ($html && strlen($html) > 5000) {
+            Log::info("Successfully fetched with Guzzle", [
+                'url' => $productUrl,
+                'content_length' => strlen($html)
+            ]);
+            return $html;
+        }
+
+        // Step 2: If Guzzle failed or returned minimal content, fall back to Browsershot
+        Log::info("Guzzle failed or returned minimal content, falling back to Browsershot", [
+            'url' => $productUrl,
+            'guzzle_content_length' => strlen($html ?? '')
+        ]);
+
+        // Use extended timeout (90 seconds) for Browsershot with reduced wait time
+        $html = $this->browserService->getPageContent($productUrl, 2, 90);
+
+        if ($html && strlen($html) > 5000) {
+            Log::info("Successfully fetched with Browsershot fallback", [
+                'url' => $productUrl,
+                'content_length' => strlen($html)
+            ]);
+            return $html;
+        }
+
+        Log::warning("All fetching strategies failed", [
+            'url' => $productUrl,
+            'final_content_length' => strlen($html ?? '')
+        ]);
+
+        return null;
     }
 
     /**

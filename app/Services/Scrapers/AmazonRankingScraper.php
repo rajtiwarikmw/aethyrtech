@@ -14,7 +14,7 @@ class AmazonRankingScraper
 {
     protected Client $httpClient;
     protected string $platform = 'amazon';
-    protected int $maxPages = 2;
+    protected int $maxPages = 5;
     protected array $stats = [
         'keywords_processed' => 0,
         'products_found' => 0,
@@ -61,7 +61,7 @@ class AmazonRankingScraper
         // Get keywords to process
         $query = Keyword::where('platform', $this->platform)
             ->where('status', true)
-            ->where('category', 'printer');
+            ->where('category', 'printer'); //Mobile  printer
 
         if ($keywordIds) {
             $query->whereIn('id', $keywordIds);

@@ -33,8 +33,11 @@ class BrowserService
 
     /**
      * Get page content with JavaScript rendering
+     * @param string $url The URL to fetch
+     * @param int $waitTime Wait time in seconds before taking screenshot
+     * @param int|null $customTimeout Override default timeout (in seconds)
      */
-    public function getPageContent(string $url, int $waitTime = 3): ?string
+    public function getPageContent(string $url, int $waitTime = 3, ?int $customTimeout = null): ?string
     {
         $attempts = 0;
         $maxAttempts = 2;
@@ -43,7 +46,12 @@ class BrowserService
             try {
                 Log::info("Fetching page content with browser (attempt " . ($attempts + 1) . ")", ['url' => $url]);
 
-                $timeout = $attempts === 0 ? $this->defaultOptions['timeout'] : ($this->defaultOptions['timeout'] * 2);
+                // Use custom timeout if provided, otherwise use default with exponential backoff
+                if ($customTimeout !== null) {
+                    $timeout = $customTimeout;
+                } else {
+                    $timeout = $attempts === 0 ? $this->defaultOptions['timeout'] : ($this->defaultOptions['timeout'] * 2);
+                }
                 
                 $browsershot = Browsershot::url($url)
                                // ->setChromePath('/usr/bin/chromium-browser')
