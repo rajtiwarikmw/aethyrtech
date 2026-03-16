@@ -532,10 +532,8 @@ class RelianceDigitalScraper extends BaseScraper
         $offers = [];
 
         $selectors = [
-            '.offer-text',
-            '.discount-info',
-            '.promotion-text',
-            'product-price-discount',
+            '.product-price-discount',
+            '.product-marked-details .product-price-discount',
         ];
 
         foreach ($selectors as $selector) {
@@ -546,6 +544,8 @@ class RelianceDigitalScraper extends BaseScraper
                 }
             });
         }
+
+        $offers = array_unique($offers); // duplicate remove
 
         return !empty($offers) ? implode('; ', $offers) : null;
     }
@@ -942,7 +942,7 @@ class RelianceDigitalScraper extends BaseScraper
 
     private function extractDeliveryDate(Crawler $crawler): ?string
     {
-        $node = $crawler->filter('h5.delivery-section--header')->first();
+        $node = $crawler->filter('.delivery-fulfilment h5.delivery-section--header')->first();
 
         if ($node->count() > 0) {
             $text = trim($node->text());
@@ -989,24 +989,20 @@ class RelianceDigitalScraper extends BaseScraper
         $crawler->filter('.rd-feedback-service-progress-row')->each(
             function (Crawler $row) use (&$ratings) {
 
-                // Star value (5,4,3,2,1)
                 $star = (int) trim(
                     $row->filter('.rd-feedback-service-rating-text')->text('0')
                 );
 
-                // Progress bar width percentage
-                $bar = $row->filter('[style*="width"]')->first();
+                $count = (int) trim(
+                    $row->filter('.rd-feedback-service-rating-count')->text('0')
+                );
 
-                if ($star >= 1 && $star <= 5 && $bar->count() > 0) {
-
-                    $style = $bar->attr('style');
-
-                    if (preg_match('/width:\s*([\d.]+)%/i', $style, $matches)) {
-                        $ratings["rating_{$star}_star_percent"] = (float) $matches[1];
-                    }
+                if ($star >= 1 && $star <= 5) {
+                    $ratings["rating_{$star}_star_count"] = $count;
                 }
             }
         );
+
 
         return $ratings;
     }

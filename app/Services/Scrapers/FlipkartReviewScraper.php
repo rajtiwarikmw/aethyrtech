@@ -4,6 +4,7 @@ namespace App\Services\Scrapers;
 
 use App\Models\Product;
 use App\Models\Review;
+use App\Services\BrowserService;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Support\Facades\Log;
@@ -12,6 +13,7 @@ use Symfony\Component\DomCrawler\Crawler;
 class FlipkartReviewScraper
 {
     protected Client $httpClient;
+    protected BrowserService $browserService;
     protected ?string $currentProductSku = null;
     protected array $stats = [
         'products_processed' => 0,
@@ -24,6 +26,7 @@ class FlipkartReviewScraper
     public function __construct()
     {
         $this->initializeHttpClient();
+        $this->browserService = new BrowserService();
     }
 
     protected function initializeHttpClient(): void
@@ -135,13 +138,18 @@ class FlipkartReviewScraper
     protected function fetchPage(string $url): ?string
     {
         try {
-            $response = $this->httpClient->get($url);
-            if ($response->getStatusCode() === 200) {
-                return $response->getBody()->getContents();
+            Log::debug("Fetching Flipkart review page with BrowserService", ['url' => $url]);
+            
+            $html = $this->browserService->getPageContent($url, 3, 120);
+            
+            if ($html && strlen($html) > 500) {
+                return $html;
             }
+            
+            Log::warning("Flipkart review page fetch failed or returned empty content", ['url' => $url]);
             return null;
-        } catch (RequestException $e) {
-            Log::error("HTTP request failed", ['url' => $url, 'error' => $e->getMessage()]);
+        } catch (\Exception $e) {
+            Log::error("Failed to fetch Flipkart review page", ['url' => $url, 'error' => $e->getMessage()]);
             return null;
         }
     }
@@ -399,9 +407,9 @@ class FlipkartReviewScraper
         }
     }
 
-    protected function randomDelay(int $min = 2, int $max = 5): void
+    protected function randomDelay(int $min = 3, int $max = 8): void
     {
-        usleep(rand($min * 1000000, $max * 1000000));
+        sleep(rand($min, $max));
     }
 
     public function getStats(): array

@@ -332,11 +332,8 @@ class FlipkartScraper extends BaseScraper
 
         // Flipkart description main block
         $flipkartSelectors = [
-            '.NF5i5Y.zH_aw0 p',
-            '.NF5i5Y.zH_aw0',
-            '.cdXR5N p',
-            '.tUTk_J p', 
-            '._4gvKMe p',
+            '.v1zwn21k.v1zwn26',
+            '.v1zwn21k.v1zwn26 p'
         ];
 
         foreach ($flipkartSelectors as $selector) {
@@ -360,7 +357,6 @@ class FlipkartScraper extends BaseScraper
 
         // Amazon fallback selectors
         $amazonSelectors = [
-            '.NF5i5Y.zH_aw0',
             '#productDescription p',
             '.a-expander-content p',
             '.aplus-v2 p'
@@ -391,21 +387,25 @@ class FlipkartScraper extends BaseScraper
     {
         $prices = ["price" => null, "sale_price" => null];
 
-        // Current price (sale price)
+        /*
+        * SALE PRICE
+        */
         $salePriceSelectors = [
-            '.v1zwn21j.v1zwn20',
-            '[class*="v1zwn21j"][class*="v1zwn20"]',
-            ".Nx9bqj.CxhGGd",
-            ".hZ3P6w.bnqy13",
-            'div[class*="v1zwn21j"][class*="v1zwn20"]',
-            'span[class*="Nx9bqj"]',
+            '.v1zwn21k.v1zwn20',                    // new Flipkart UI
+            '[class*="v1zwn21k"][class*="v1zwn20"]',
+            '.Nx9bqj.CxhGGd',                      // older UI
+            '.hZ3P6w.bnqy13',
+            'div[class*="v1zwn21k"][class*="v1zwn20"]',
+            'span[class*="Nx9bqj"]'
         ];
 
         foreach ($salePriceSelectors as $selector) {
             $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
+
+            if ($element->count()) {
                 $priceText = $this->cleanText($element->text());
                 $price = $this->extractPrice($priceText);
+
                 if ($price) {
                     $prices["sale_price"] = $price;
                     break;
@@ -413,28 +413,31 @@ class FlipkartScraper extends BaseScraper
             }
         }
 
-        // Original price (MRP or regular price)
+        /*
+        * ORIGINAL PRICE (MRP)
+        */
         $mrpPriceSelectors = [
-            '.v1zwn21k.v1zwn21',
-             '[class*="v1zwn21k"][style*="line-through"]',
-            ".hl05eU .yRaY8j",
-            ".kRYCnD.yHYOcc",
+            '.v1zwn21l.v1zwn21',                      // new Flipkart UI
+            '[class*="v1zwn21l"][style*="line-through"]',
             'div[style*="line-through"]',
             'span[style*="line-through"]',
+            '.hl05eU .yRaY8j',                        // older UI
+            '.kRYCnD.yHYOcc'
         ];
-            
+
         foreach ($mrpPriceSelectors as $selector) {
             $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
+
+            if ($element->count()) {
                 $priceText = $this->cleanText($element->text());
                 $price = $this->extractPrice($priceText);
+
                 if ($price) {
                     $prices["price"] = $price;
                     break;
                 }
             }
         }
-
 
         return $prices;
     }
@@ -454,21 +457,15 @@ class FlipkartScraper extends BaseScraper
     {
         $offers = [];
 
-        // 🔒 Lock inside product container
-        $root = $crawler->filter('.OmE16y')->first();
-
-        if (!$root->count()) {
-            return null;
-        }
-
         $selectors = [
-            '.v1zwn21y.v1zwn20',   // New Flipkart layout (discount %)
-            '[class*="v1zwn21y"]', // fallback
+            '.v1zwn21z.v1zwn20',          // new Flipkart discount %
+            '[class*="v1zwn21z"][class*="v1zwn20"]',
+            'div[class*="v1zwn21"][class*="20"]', // fallback
         ];
 
         foreach ($selectors as $selector) {
 
-            $elements = $root->filter($selector);
+            $elements = $crawler->filter($selector);
 
             foreach ($elements as $node) {
 
@@ -482,7 +479,7 @@ class FlipkartScraper extends BaseScraper
             }
 
             if (!empty($offers)) {
-                break; // stop after first valid selector
+                break;
             }
         }
 
@@ -522,51 +519,55 @@ class FlipkartScraper extends BaseScraper
     {
         $data = ['rating' => null, 'review_count' => 0];
 
+        /*
+        * Rating selectors
+        */
         $ratingSelectors = [
-            '.asbjxx.A02XR3.lV7ANv.Yd5OMU .css-1rynq56',
+            '.css-146c3p1',                     // new Flipkart rating
+            '.asbjxx .css-146c3p1',
             'div[class*="rating"] span',
-            'span[class*="rating"]',
-            '.v1zwn21j.v1zwn20',
+            'span[class*="rating"]'
         ];
 
         foreach ($ratingSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $text = trim($element->text());
-                $rating = $this->extractRating($text);
-                if ($rating) {
-                    $data['rating'] = $rating;
-                    break;
+            $elements = $crawler->filter($selector);
+
+            foreach ($elements as $node) {
+
+                $text = trim((new Crawler($node))->text());
+
+                if (preg_match('/^\d\.\d$/', $text)) {
+                    $data['rating'] = (float)$text;
+                    break 2;
                 }
             }
         }
 
+        /*
+        * Review selectors
+        */
         $reviewSelectors = [
-            'a[href*="ratings-reviews"] .css-1rynq56',
+            'a[href*="ratings-reviews"] .css-146c3p1',
             'a[href*="ratings-reviews"]',
-            'span[class*="review"]',
-            'div[class*="review"] span'
+            '.css-146c3p1'
         ];
 
         foreach ($reviewSelectors as $selector) {
-            $element = $crawler->filter($selector)->first();
-            if ($element->count() > 0) {
-                $text = trim($element->text());
 
-                // Flipkart format: "278 Ratings & 23 Reviews"
-                if (preg_match('/(\d+)\s+Ratings.*?(\d+)\s+Reviews/', $text, $matches)) {
-                    $data['review_count'] = (int)$matches[2];
-                } elseif (preg_match('/(\d+)\s+Reviews?/', $text, $matches)) {
-                    $data['review_count'] = (int)$matches[1];
-                } else {
-                    $reviewCount = $this->extractReviewCount($text);
-                    if ($reviewCount > 0) {
-                        $data['review_count'] = $reviewCount;
-                    }
+            $elements = $crawler->filter($selector);
+
+            foreach ($elements as $node) {
+
+                $text = trim((new Crawler($node))->text());
+
+                if (preg_match('/\|\s*([\d,]+)/', $text, $match)) {
+                    $data['review_count'] = (int)str_replace(',', '', $match[1]);
+                    break 2;
                 }
 
-                if ($data['review_count'] > 0) {
-                    break;
+                if (preg_match('/([\d,]+)\s*Reviews?/', $text, $match)) {
+                    $data['review_count'] = (int)str_replace(',', '', $match[1]);
+                    break 2;
                 }
             }
         }
@@ -615,33 +616,23 @@ class FlipkartScraper extends BaseScraper
     {
         $images = [];
 
-        // Primary selector for Flipkart images
-        $crawler->filter('ul.f67RGv li img.EIfF82')->each(function (Crawler $node) use (&$images) {
+        // lock inside product gallery container
+        $crawler->filter('div._1psv1ze36 picture img')->each(function (Crawler $node) use (&$images) {
+
             $src = $node->attr('src');
-            if ($src && strpos($src, 'http') === 0) {
+
+            if (!$src) {
+                $srcset = $node->attr('srcset');
+                if ($srcset) {
+                    $parts = explode(',', $srcset);
+                    $src = trim(explode(' ', $parts[0])[0]);
+                }
+            }
+
+            if ($src && str_contains($src, 'rukminim')) {
                 $images[] = $src;
             }
         });
-
-        // Fallback: Try other image containers
-        if (empty($images)) {
-            $crawler->filter('img[alt*="product"], img[alt*="Product"], div.slick-slide img')->each(function (Crawler $node) use (&$images) {
-                $src = $node->attr('src');
-                if ($src && strpos($src, 'http') === 0 && strpos($src, 'flipkart') !== false) {
-                    $images[] = $src;
-                }
-            });
-        }
-
-        // Fallback: Try data-src attribute for lazy-loaded images
-        if (empty($images)) {
-            $crawler->filter('img[data-src]')->each(function (Crawler $node) use (&$images) {
-                $src = $node->attr('data-src');
-                if ($src && strpos($src, 'http') === 0) {
-                    $images[] = $src;
-                }
-            });
-        }
 
         return !empty($images) ? array_values(array_unique($images)) : null;
     }
@@ -677,15 +668,15 @@ class FlipkartScraper extends BaseScraper
     {
         $brand = null;
 
-        // NEW Flipkart layout (grid specs)
+        // New Flipkart layout
         $crawler->filter('.grid-formation-dynamic')->each(function (Crawler $row) use (&$brand) {
 
             if ($brand !== null) {
                 return;
             }
 
-            $labelNode = $row->filter('.v1zwn21k')->first();
-            $valueNode = $row->filter('.v1zwn21j')->first();
+            $labelNode = $row->filter('.v1zwn21l.v1zwn27')->first();
+            $valueNode = $row->filter('.v1zwn21k.v1zwn26')->first();
 
             if (!$labelNode->count() || !$valueNode->count()) {
                 return;
@@ -698,19 +689,6 @@ class FlipkartScraper extends BaseScraper
             }
         });
 
-        // Fallback: Try from specifications table
-        if (!$brand) {
-            $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$brand) {
-                if ($brand !== null) return;
-                $cells = $row->filter('td');
-                if ($cells->count() >= 2) {
-                    $label = strtolower(trim($cells->eq(0)->text()));
-                    if (strpos($label, 'brand') !== false) {
-                        $brand = trim($cells->eq(1)->text());
-                    }
-                }
-            });
-        }
 
         return $brand;
     }
@@ -728,7 +706,8 @@ class FlipkartScraper extends BaseScraper
             }
 
             // label = Model Name
-            $labelNode = $row->filter('.v1zwn21k')->first();
+            $labelNode = $row->filter('.v1zwn21l.v1zwn27')->first();
+
             if (!$labelNode->count()) {
                 return;
             }
@@ -737,8 +716,9 @@ class FlipkartScraper extends BaseScraper
 
             if ($label === 'model name') {
 
-                // value = g06 power
-                $valueNode = $row->filter('.v1zwn21j')->first();
+                // value
+                $valueNode = $row->filter('.v1zwn21k.v1zwn26')->first();
+
                 if ($valueNode->count()) {
                     $model = trim($valueNode->text());
                 }
@@ -803,21 +783,52 @@ class FlipkartScraper extends BaseScraper
     {
         $weight = null;
 
-        $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$weight) {
-            $cells = $row->filter('td');
-            if ($cells->count() >= 2) {
-                $label = strtolower(trim($cells->eq(0)->text()));
-                if (strpos($label, 'weight') !== false) {
-                    // Value inside <ul><li>
-                    $weightNode = $cells->eq(1)->filter('li')->first();
-                    if ($weightNode->count() > 0) {
-                        $weight = trim($weightNode->text());
-                    } else {
-                        $weight = trim($cells->eq(1)->text());
-                    }
-                }
+        // New Flipkart layout
+        $crawler->filter('.grid-formation-dynamic')->each(function (Crawler $row) use (&$weight) {
+
+            if ($weight !== null) {
+                return;
+            }
+
+            $labelNode = $row->filter('.v1zwn21l.v1zwn27')->first();
+            $valueNode = $row->filter('.v1zwn21k.v1zwn26')->first();
+
+            if (!$labelNode->count() || !$valueNode->count()) {
+                return;
+            }
+
+            $label = strtolower(trim($labelNode->text()));
+
+            if (strpos($label, 'weight') !== false) {
+                $weight = trim($valueNode->text());
             }
         });
+
+        // Fallback: old Flipkart specification table
+        if (!$weight) {
+            $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$weight) {
+
+                if ($weight !== null) return;
+
+                $cells = $row->filter('td');
+
+                if ($cells->count() >= 2) {
+
+                    $label = strtolower(trim($cells->eq(0)->text()));
+
+                    if (strpos($label, 'weight') !== false) {
+
+                        $weightNode = $cells->eq(1)->filter('li')->first();
+
+                        if ($weightNode->count()) {
+                            $weight = trim($weightNode->text());
+                        } else {
+                            $weight = trim($cells->eq(1)->text());
+                        }
+                    }
+                }
+            });
+        }
 
         return $weight;
     }
@@ -829,8 +840,8 @@ class FlipkartScraper extends BaseScraper
         // loop through spec rows
         $crawler->filter('.grid-formation-dynamic')->each(function (Crawler $row) use (&$dimensions) {
 
-            $labelNode = $row->filter('.v1zwn21k')->first();
-            $valueNode = $row->filter('.v1zwn21j')->first();
+            $labelNode = $row->filter('.v1zwn21l.v1zwn27')->first();
+            $valueNode = $row->filter('.v1zwn21k.v1zwn26')->first();
 
             if (!$labelNode->count() || !$valueNode->count()) {
                 return;
@@ -870,22 +881,23 @@ class FlipkartScraper extends BaseScraper
     {
         $manufacturer = null;
 
-        $crawler->filter('.v1zwn21k')->each(function (Crawler $labelNode) use (&$manufacturer) {
+        $crawler->filter('.grid-formation-dynamic')->each(function (Crawler $row) use (&$manufacturer) {
 
             if ($manufacturer !== null) {
+                return;
+            }
+
+            $labelNode = $row->filter('.v1zwn21l.v1zwn27')->first();
+            $valueNode = $row->filter('.v1zwn21k.v1zwn26')->first();
+
+            if (!$labelNode->count() || !$valueNode->count()) {
                 return;
             }
 
             $label = strtolower(trim($labelNode->text()));
 
             if (str_contains($label, 'manufacturer')) {
-
-                // value is next sibling with class v1zwn21j
-                $valueNode = $labelNode->ancestors()->first()->filter('.v1zwn21j')->first();
-
-                if ($valueNode->count()) {
-                    $manufacturer = trim($valueNode->text());
-                }
+                $manufacturer = trim($valueNode->text());
             }
         });
 
@@ -990,23 +1002,28 @@ class FlipkartScraper extends BaseScraper
 
     private function extractSellerName(Crawler $crawler): ?string
     {
-        $sellerNode = $crawler->filter('#sellerName span span')->first(); // target inner span with name
-        if ($sellerNode->count() > 0) {
-            return $this->cleanText($sellerNode->text());
+        $node = $crawler->filter('.v1zwn21k.v1zwn25')->first();
+
+        if (!$node->count()) {
+            return null;
         }
 
-        return null;
+        $text = trim($node->text());
+
+        // remove "Fulfilled by"
+        $text = preg_replace('/Fulfilled by/i', '', $text);
+
+        return $text ? $this->cleanText(trim($text)) : null;
     }
 
     private function extractDeliveryDate(Crawler $crawler): ?string
     {
-        
-        $node = $crawler->filter('a[href*="delivery-page"]')->first();
+        // delivery block inside delivery-page link
+        $node = $crawler->filter('a[href*="delivery-page"] .v1zwn21k.v1zwn24')->last();
 
         if ($node->count() === 0) {
             return null;
         }
-
 
         $text = trim($node->text());
 
@@ -1020,6 +1037,7 @@ class FlipkartScraper extends BaseScraper
 
         return $this->cleanText($text);
     }
+
 
 
     private function extractDeliveryPrice(Crawler $crawler): ?string
@@ -1048,24 +1066,27 @@ class FlipkartScraper extends BaseScraper
         $highlights = [];
 
         /*
-        * ✅ NEW Flipkart Highlights (grid cards under "Product highlights")
-        * Target only text blocks inside the highlights section
+        * New Flipkart UI (2025+)
         */
-        $crawler->filter('div:contains("Product highlights")')->each(function (Crawler $node) use (&$highlights) {
-            // Use filter to find the next sibling container that holds the highlights
-            $container = $node->closest('div')->nextAll()->first();
-            if ($container->count() > 0) {
-                $container->filter('div.v1zwn21j.v1zwn25')->each(function (Crawler $item) use (&$highlights) {
-                    $text = trim($item->text());
-                    if ($text !== '') {
-                        $highlights[] = $text;
-                    }
-                });
+        $crawler->filter('div.grid-formation')->each(function (Crawler $node) use (&$highlights) {
+
+            $title = $node->filter('.v1zwn21l.v1zwn27')->count() 
+                ? trim($node->filter('.v1zwn21l.v1zwn27')->text()) 
+                : '';
+
+            $desc = $node->filter('.v1zwn21k.v1zwn25')->count() 
+                ? trim($node->filter('.v1zwn21k.v1zwn25')->text()) 
+                : '';
+
+            $text = trim($title . ' ' . $desc);
+
+            if ($text !== '') {
+                $highlights[] = $text;
             }
         });
 
         /*
-        * ✅ Previous Flipkart structure
+        * Previous Flipkart structure
         */
         if (empty($highlights)) {
             $crawler->filter('div.iNKhRz ul li.LS5qY1')->each(function (Crawler $node) use (&$highlights) {
@@ -1077,7 +1098,7 @@ class FlipkartScraper extends BaseScraper
         }
 
         /*
-        * ✅ Older fallback
+        * Older fallback
         */
         if (empty($highlights)) {
             $crawler->filter('div.xFVion ul li._7eSDEz')->each(function (Crawler $node) use (&$highlights) {
@@ -1087,6 +1108,8 @@ class FlipkartScraper extends BaseScraper
                 }
             });
         }
+
+        $highlights = array_unique($highlights);
 
         return !empty($highlights) ? implode(' | ', $highlights) : null;
     }
@@ -1099,27 +1122,35 @@ class FlipkartScraper extends BaseScraper
     {
         $details = [];
 
-        // Extract all specifications from grid formation
+        // Extract from new Flipkart specification layout
         $crawler->filter('div.grid-formation-dynamic')->each(function (Crawler $block) use (&$details) {
-            $labelNode = $block->filter('div.v1zwn21k')->first();
-            $valueNode = $block->filter('div.v1zwn21j')->first();
+
+            $labelNode = $block->filter('div.v1zwn21l.v1zwn27')->first();
+            $valueNode = $block->filter('div.v1zwn21k.v1zwn26')->first();
 
             if ($labelNode->count() && $valueNode->count()) {
+
                 $label = trim($labelNode->text());
                 $value = trim($valueNode->text());
+
                 if ($label && $value) {
                     $details[] = $label . ': ' . $value;
                 }
             }
         });
 
-        // Fallback: Extract from specifications table
+        // Fallback for old Flipkart specification table
         if (empty($details)) {
+
             $crawler->filter('table.n7infM tr, table._0ZhAN9 tr')->each(function (Crawler $row) use (&$details) {
+
                 $cells = $row->filter('td');
+
                 if ($cells->count() >= 2) {
+
                     $label = trim($cells->eq(0)->text());
                     $value = trim($cells->eq(1)->text());
+
                     if ($label && $value) {
                         $details[] = $label . ': ' . $value;
                     }

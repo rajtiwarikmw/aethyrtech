@@ -5,6 +5,7 @@ namespace App\Services\Scrapers;
 use App\Models\Keyword;
 use App\Models\Product;
 use App\Models\ProductRanking;
+use App\Services\BrowserService;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\DomCrawler\Crawler;
@@ -12,6 +13,7 @@ use Symfony\Component\DomCrawler\Crawler;
 class FlipkartRankingScraper
 {
     protected Client $httpClient;
+    protected BrowserService $browserService;
     protected string $platform = 'flipkart';
     protected int $maxPages = 2;
     protected array $stats = [
@@ -25,6 +27,7 @@ class FlipkartRankingScraper
     public function __construct()
     {
         $this->initializeHttpClient();
+        $this->browserService = new BrowserService();
     }
 
     protected function initializeHttpClient(): void
@@ -132,16 +135,12 @@ class FlipkartRankingScraper
     protected function fetchPage(string $url): ?string
     {
         try {
-            Log::debug("Fetching Flipkart page", ['url' => $url]);
-            $response = $this->httpClient->get($url);
-            $statusCode = $response->getStatusCode();
+            Log::debug("Fetching Flipkart page with BrowserService", ['url' => $url]);
             
-            if ($statusCode === 200) {
-                // Get body content once and reuse it
-                $html = $response->getBody()->getContents();
-                
+            $html = $this->browserService->getPageContent($url, 3, 120);
+            
+            if ($html && strlen($html) > 500) {
                 Log::debug("Flipkart page response", [
-                    'status_code' => $statusCode,
                     'content_length' => strlen($html),
                     'has_products' => substr_count($html, '/p/itm') > 0
                 ]);
@@ -149,8 +148,7 @@ class FlipkartRankingScraper
                 return $html;
             }
             
-            Log::warning("Flipkart returned non-200 status", [
-                'status_code' => $statusCode,
+            Log::warning("Flipkart page fetch failed or returned empty content", [
                 'url' => $url
             ]);
             
@@ -302,9 +300,9 @@ class FlipkartRankingScraper
         }
     }
 
-    protected function randomDelay(int $min = 2, int $max = 5): void
+    protected function randomDelay(int $min = 3, int $max = 8): void
     {
-        usleep(rand($min * 1000000, $max * 1000000));
+        sleep(rand($min, $max));
     }
 
     public function getStats(): array
